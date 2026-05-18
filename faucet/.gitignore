@@ -1,0 +1,8 @@
+/target/
+faucet.db
+*.db
+*.db-wal
+*.db-shm
+.env
+wallet.seed
+*.seed
