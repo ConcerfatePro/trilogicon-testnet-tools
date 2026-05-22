@@ -7,6 +7,7 @@ const DEFAULT_DATABASE_URL: &str = "sqlite:faucet.db";
 const DEFAULT_DRY_RUN: bool = true;
 const DEFAULT_CLAIM_AMOUNT: i64 = 10;
 const DEFAULT_COOLDOWN_SECONDS: i64 = 3600;
+const DEFAULT_IP_COOLDOWN_SECONDS: i64 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -15,6 +16,7 @@ pub struct Config {
     pub dry_run: bool,
     pub claim_amount: i64,
     pub cooldown_seconds: i64,
+    pub ip_cooldown_seconds: i64,
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
@@ -65,12 +67,19 @@ impl Config {
             return Err("FAUCET_COOLDOWN_SECONDS must be non-negative".to_string());
         }
 
+        let ip_cooldown_seconds =
+            env_i64("FAUCET_IP_COOLDOWN_SECONDS", DEFAULT_IP_COOLDOWN_SECONDS)?;
+        if ip_cooldown_seconds < 0 {
+            return Err("FAUCET_IP_COOLDOWN_SECONDS must be non-negative".to_string());
+        }
+
         Ok(Self {
             bind_addr,
             database_url,
             dry_run,
             claim_amount,
             cooldown_seconds,
+            ip_cooldown_seconds,
         })
     }
 }
@@ -97,6 +106,7 @@ mod tests {
             "FAUCET_DRY_RUN",
             "FAUCET_CLAIM_AMOUNT",
             "FAUCET_COOLDOWN_SECONDS",
+            "FAUCET_IP_COOLDOWN_SECONDS",
         ] {
             env::remove_var(key);
         }
@@ -107,6 +117,16 @@ mod tests {
         assert!(c.dry_run);
         assert_eq!(c.claim_amount, DEFAULT_CLAIM_AMOUNT);
         assert_eq!(c.cooldown_seconds, DEFAULT_COOLDOWN_SECONDS);
+        assert_eq!(c.ip_cooldown_seconds, DEFAULT_IP_COOLDOWN_SECONDS);
+    }
+
+    #[test]
+    fn invalid_ip_cooldown_fails_startup() {
+        let _g = env_lock();
+        env::set_var("FAUCET_IP_COOLDOWN_SECONDS", "not-a-number");
+        let err = Config::from_env().expect_err("invalid ip cooldown");
+        assert!(err.contains("FAUCET_IP_COOLDOWN_SECONDS"));
+        env::remove_var("FAUCET_IP_COOLDOWN_SECONDS");
     }
 
     #[test]
@@ -116,6 +136,7 @@ mod tests {
         env::remove_var("FAUCET_DATABASE_URL");
         env::remove_var("FAUCET_CLAIM_AMOUNT");
         env::remove_var("FAUCET_COOLDOWN_SECONDS");
+        env::remove_var("FAUCET_IP_COOLDOWN_SECONDS");
         env::set_var("FAUCET_DRY_RUN", "false");
         let c = Config::from_env().expect("parse");
         assert!(!c.dry_run);

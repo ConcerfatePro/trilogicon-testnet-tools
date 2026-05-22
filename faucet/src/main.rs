@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::routes::{app_router, AppState};
 use anyhow::Context;
 use axum::serve;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -34,7 +35,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = app_router(state);
-    serve(listener, app).await.context("server error")?;
+    serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("server error")?;
 
     Ok(())
 }

@@ -41,8 +41,15 @@ async fn init_schema(pool: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn parse_created_at(row: &sqlx::sqlite::SqliteRow) -> Result<DateTime<Utc>, sqlx::Error> {
+    let created_at: String = row.try_get("created_at")?;
+    DateTime::parse_from_rfc3339(&created_at)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| sqlx::error::Error::Decode(Box::new(e)))
+}
+
 /// Returns the `created_at` of the most recent claim for this exact address, if any.
-pub async fn latest_claim_time(
+pub async fn latest_claim_for_address(
     pool: &SqlitePool,
     address: &str,
 ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
@@ -59,15 +66,34 @@ pub async fn latest_claim_time(
     .fetch_optional(pool)
     .await?;
 
-    let Some(row) = row else {
-        return Ok(None);
-    };
+    match row {
+        Some(row) => Ok(Some(parse_created_at(&row)?)),
+        None => Ok(None),
+    }
+}
 
-    let created_at: String = row.try_get("created_at")?;
-    let dt = DateTime::parse_from_rfc3339(&created_at)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| sqlx::error::Error::Decode(Box::new(e)))?;
-    Ok(Some(dt))
+/// Returns the `created_at` of the most recent claim for this client IP, if any.
+pub async fn latest_claim_for_ip(
+    pool: &SqlitePool,
+    ip: &str,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT created_at
+        FROM claims
+        WHERE ip = ?1
+        ORDER BY id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(ip)
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(row) => Ok(Some(parse_created_at(&row)?)),
+        None => Ok(None),
+    }
 }
 
 pub async fn insert_claim(
@@ -113,11 +139,32 @@ mod tests {
         insert_claim(&pool, "addr1", None, 10, true, "dry_run_accepted")
             .await
             .expect("insert");
-        let t = latest_claim_time(&pool, "addr1").await.expect("query");
+        let t = latest_claim_for_address(&pool, "addr1")
+            .await
+            .expect("query");
         assert!(t.is_some());
-        assert!(latest_claim_time(&pool, "addr2")
+        assert!(latest_claim_for_address(&pool, "addr2")
             .await
             .expect("q")
+            .is_none());
+
+        insert_claim(
+            &pool,
+            "addr2",
+            Some("203.0.113.1"),
+            10,
+            true,
+            "dry_run_accepted",
+        )
+        .await
+        .expect("insert with ip");
+        let ip_t = latest_claim_for_ip(&pool, "203.0.113.1")
+            .await
+            .expect("ip query");
+        assert!(ip_t.is_some());
+        assert!(latest_claim_for_ip(&pool, "203.0.113.2")
+            .await
+            .expect("ip q")
             .is_none());
     }
 }

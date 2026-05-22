@@ -2,12 +2,14 @@
 
 use crate::config::Config;
 use crate::db;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
@@ -34,6 +36,7 @@ pub struct StatusResponse {
     pub dry_run: bool,
     pub claim_amount: i64,
     pub cooldown_seconds: i64,
+    pub ip_cooldown_seconds: i64,
 }
 
 #[derive(Deserialize)]
@@ -41,7 +44,7 @@ pub struct ClaimRequest {
     pub address: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ClaimErrResponse {
     pub ok: bool,
     pub error: &'static str,
@@ -66,6 +69,11 @@ pub fn validate_address(address: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn within_cooldown(last: DateTime<Utc>, cooldown_seconds: i64) -> bool {
+    let elapsed = Utc::now().signed_duration_since(last);
+    elapsed.num_seconds() < cooldown_seconds
+}
+
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
@@ -80,12 +88,15 @@ async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
         dry_run: state.config.dry_run,
         claim_amount: state.config.claim_amount,
         cooldown_seconds: state.config.cooldown_seconds,
+        ip_cooldown_seconds: state.config.ip_cooldown_seconds,
     })
 }
 
-async fn claim(
-    State(state): State<AppState>,
-    Json(body): Json<ClaimRequest>,
+/// Core claim handler; `client_ip` is supplied by the HTTP layer or tests.
+pub(crate) async fn process_claim(
+    state: &AppState,
+    client_ip: &str,
+    body: ClaimRequest,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ClaimErrResponse>)> {
     if !state.config.dry_run {
         return Err((
@@ -109,20 +120,11 @@ async fn claim(
 
     let address = body.address.trim().to_string();
 
-    if let Some(last) = db::latest_claim_time(&state.pool, &address)
+    if let Some(last) = db::latest_claim_for_address(&state.pool, &address)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ClaimErrResponse {
-                    ok: false,
-                    error: "database_error",
-                }),
-            )
-        })?
+        .map_err(|_| db_error())?
     {
-        let elapsed = chrono::Utc::now().signed_duration_since(last);
-        if elapsed.num_seconds() < state.config.cooldown_seconds {
+        if within_cooldown(last, state.config.cooldown_seconds) {
             return Err((
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(ClaimErrResponse {
@@ -133,25 +135,31 @@ async fn claim(
         }
     }
 
-    // Client IP can be wired later (e.g. `ConnectInfo` or `X-Forwarded-For` behind a proxy).
+    if let Some(last) = db::latest_claim_for_ip(&state.pool, client_ip)
+        .await
+        .map_err(|_| db_error())?
+    {
+        if within_cooldown(last, state.config.ip_cooldown_seconds) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ClaimErrResponse {
+                    ok: false,
+                    error: "ip_rate_limited",
+                }),
+            ));
+        }
+    }
+
     db::insert_claim(
         &state.pool,
         &address,
-        None,
+        Some(client_ip),
         state.config.claim_amount,
         true,
         "dry_run_accepted",
     )
     .await
-    .map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ClaimErrResponse {
-                ok: false,
-                error: "database_error",
-            }),
-        )
-    })?;
+    .map_err(|_| db_error())?;
 
     let body = serde_json::json!({
         "ok": true,
@@ -163,6 +171,28 @@ async fn claim(
     });
 
     Ok(Json(body))
+}
+
+fn db_error() -> (StatusCode, Json<ClaimErrResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ClaimErrResponse {
+            ok: false,
+            error: "database_error",
+        }),
+    )
+}
+
+async fn claim(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<ClaimRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ClaimErrResponse>)> {
+    // Local/dev: use the socket peer IP from ConnectInfo.
+    // Reverse-proxy support (e.g. trusted X-Forwarded-For) should be added explicitly later;
+    // do not trust X-Forwarded-For in this MVP.
+    let client_ip = peer.ip().to_string();
+    process_claim(&state, &client_ip, body).await
 }
 
 pub fn app_router(state: AppState) -> Router {
@@ -185,18 +215,30 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    async fn test_app(dry_run: bool, cooldown_seconds: i64) -> (Router, sqlx::SqlitePool) {
-        let pool = db::connect("sqlite::memory:").await.expect("connect");
-        let config = Arc::new(Config {
+    fn test_config(dry_run: bool, cooldown_seconds: i64, ip_cooldown_seconds: i64) -> Arc<Config> {
+        Arc::new(Config {
             bind_addr: "127.0.0.1:0".to_string(),
             database_url: "sqlite::memory:".to_string(),
             dry_run,
             claim_amount: 10,
             cooldown_seconds,
-        });
-        let pool_for_assert = pool.clone();
-        let app = app_router(AppState { config, pool });
-        (app, pool_for_assert)
+            ip_cooldown_seconds,
+        })
+    }
+
+    async fn test_app(
+        dry_run: bool,
+        cooldown_seconds: i64,
+        ip_cooldown_seconds: i64,
+    ) -> (Router, AppState) {
+        let pool = db::connect("sqlite::memory:").await.expect("connect");
+        let config = test_config(dry_run, cooldown_seconds, ip_cooldown_seconds);
+        let state = AppState {
+            config: config.clone(),
+            pool,
+        };
+        let app = app_router(state.clone());
+        (app, state)
     }
 
     async fn claim_count(pool: &sqlx::SqlitePool) -> i64 {
@@ -230,73 +272,149 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dry_run_disabled_returns_payouts_not_enabled() {
-        let (app, pool) = test_app(false, 3600).await;
-        assert_eq!(claim_count(&pool).await, 0);
-
+    async fn status_includes_ip_cooldown_seconds() {
+        let (app, _) = test_app(true, 3600, 7200).await;
         let req = Request::builder()
-            .method("POST")
-            .uri("/api/claim")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"address":"tl1test_example"}"#))
+            .uri("/api/status")
+            .body(Body::empty())
             .expect("request");
-        let resp = app.oneshot(req).await.expect("claim");
-        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let resp = app.oneshot(req).await.expect("status");
+        assert_eq!(resp.status(), StatusCode::OK);
 
         let body = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
         let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
-        assert_eq!(json["ok"], false);
-        assert_eq!(json["error"], "payouts_not_enabled");
-        assert_eq!(claim_count(&pool).await, 0);
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["ip_cooldown_seconds"], 7200);
+        assert_eq!(json["cooldown_seconds"], 3600);
+    }
+
+    #[tokio::test]
+    async fn dry_run_disabled_returns_payouts_not_enabled() {
+        let (_, state) = test_app(false, 3600, 3600).await;
+        assert_eq!(claim_count(&state.pool).await, 0);
+
+        let result = process_claim(
+            &state,
+            "127.0.0.1",
+            ClaimRequest {
+                address: "tl1test_example".to_string(),
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        let (status, Json(err)) = result.expect_err("should fail");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.error, "payouts_not_enabled");
+        assert_eq!(claim_count(&state.pool).await, 0);
     }
 
     #[tokio::test]
     async fn rate_limit_applies_to_trimmed_address() {
-        let (app, _pool) = test_app(true, 3600).await;
+        let (_, state) = test_app(true, 3600, 3600).await;
+        let ip = "10.0.0.1";
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/claim")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"address":"  abc123  "}"#))
-            .expect("request");
-        let resp = app.clone().oneshot(req).await.expect("first claim");
-        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "  abc123  ".to_string(),
+            },
+        )
+        .await
+        .expect("first claim");
 
-        let req2 = Request::builder()
-            .method("POST")
-            .uri("/api/claim")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"address":"abc123"}"#))
-            .expect("request");
-        let resp2 = app.oneshot(req2).await.expect("second claim");
-        assert_eq!(resp2.status(), StatusCode::TOO_MANY_REQUESTS);
-
-        let body = to_bytes(resp2.into_body(), usize::MAX).await.expect("body");
-        let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
-        assert_eq!(json["error"], "rate_limited");
+        let result = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "abc123".to_string(),
+            },
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("second claim");
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(err.error, "rate_limited");
     }
 
     #[tokio::test]
     async fn rate_limit_second_claim_within_cooldown() {
-        let (app, _pool) = test_app(true, 3600).await;
+        let (_, state) = test_app(true, 3600, 3600).await;
+        let ip = "10.0.0.2";
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/claim")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"address":"same_addr"}"#))
-            .expect("request");
-        let resp = app.clone().oneshot(req).await.expect("first claim");
-        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "same_addr".to_string(),
+            },
+        )
+        .await
+        .expect("first claim");
 
-        let req2 = Request::builder()
-            .method("POST")
-            .uri("/api/claim")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"address":"same_addr"}"#))
-            .expect("request");
-        let resp2 = app.oneshot(req2).await.expect("second claim");
-        assert_eq!(resp2.status(), StatusCode::TOO_MANY_REQUESTS);
+        let result = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "same_addr".to_string(),
+            },
+        )
+        .await;
+        let (status, _) = result.expect_err("second claim");
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn same_ip_hits_ip_rate_limited_for_different_addresses() {
+        let (_, state) = test_app(true, 3600, 3600).await;
+        let ip = "198.51.100.42";
+
+        let _ = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "addr_a".to_string(),
+            },
+        )
+        .await
+        .expect("first claim");
+
+        let result = process_claim(
+            &state,
+            ip,
+            ClaimRequest {
+                address: "addr_b".to_string(),
+            },
+        )
+        .await;
+        let (status, Json(err)) = result.expect_err("second claim same ip");
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(err.error, "ip_rate_limited");
+    }
+
+    #[tokio::test]
+    async fn different_ips_can_claim_different_addresses() {
+        let (_, state) = test_app(true, 3600, 3600).await;
+
+        let _ = process_claim(
+            &state,
+            "203.0.113.10",
+            ClaimRequest {
+                address: "addr_x".to_string(),
+            },
+        )
+        .await
+        .expect("claim from ip 10");
+
+        let _ = process_claim(
+            &state,
+            "203.0.113.11",
+            ClaimRequest {
+                address: "addr_y".to_string(),
+            },
+        )
+        .await
+        .expect("claim from ip 11");
+
+        assert_eq!(claim_count(&state.pool).await, 2);
     }
 }
