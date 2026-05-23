@@ -1,8 +1,10 @@
 mod config;
 mod db;
+mod payout;
 mod routes;
 
 use crate::config::Config;
+use crate::payout::default_payout_adapter;
 use crate::routes::{app_router, AppState};
 use anyhow::Context;
 use axum::serve;
@@ -32,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         config: Arc::new(config),
         pool,
+        payout: default_payout_adapter(),
     };
 
     let app = app_router(state);

@@ -60,6 +60,16 @@ MVP 3b keeps future payout-related environment variables in the config layer and
 
 `GET /api/status` exposes safe fields (`payouts_enabled`, `network`, `node_mode`) and **does not** expose seed paths, CLI paths, or node data directories. `FAUCET_DRY_RUN=false` still returns `payouts_not_enabled` on claim requests.
 
+### Payout adapter (MVP 3c, dry-run only)
+
+MVP 3c adds an internal `PayoutAdapter` trait and a `DryRunPayoutAdapter` implementation. Claim handling submits a payout request through this adapter after validation and rate limits, then records the adapter result in SQLite.
+
+- Only the **dry-run adapter** is wired; it never sends TRIL.
+- No CLI, RPC, or node integration exists.
+- No seed files are read; no keys are derived.
+- `FAUCET_ENABLE_PAYOUTS=true` still fails startup.
+- Real testnet payouts remain a later milestone (MVP 3d).
+
 ### Example `curl` commands
 
 Health:

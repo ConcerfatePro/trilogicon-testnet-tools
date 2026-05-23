@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::db;
+use crate::payout::{PayoutAdapter, PayoutError, PayoutRequest};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -21,6 +22,7 @@ const MAX_CLAIM_BODY_BYTES: usize = 512;
 pub struct AppState {
     pub config: Arc<Config>,
     pub pool: SqlitePool,
+    pub payout: Arc<dyn PayoutAdapter>,
 }
 
 #[derive(Serialize)]
@@ -155,25 +157,42 @@ pub(crate) async fn process_claim(
             ));
         }
     }
+    let payout_request = PayoutRequest {
+        address: address.clone(),
+        amount: state.config.claim_amount as u64,
+        fee: state.config.fixed_fee as u64,
+        dry_run: true,
+    };
+
+    let payout_result = state
+        .payout
+        .submit_payout(payout_request)
+        .await
+        .map_err(map_payout_error)?;
 
     db::insert_claim(
         &state.pool,
         &address,
         Some(client_ip),
         state.config.claim_amount,
-        true,
-        "dry_run_accepted",
+        payout_result.dry_run,
+        &payout_result.status,
     )
     .await
     .map_err(|_| db_error())?;
 
+    let tx_hash = payout_result
+        .tx_hash
+        .map(serde_json::Value::String)
+        .unwrap_or(serde_json::Value::Null);
+
     let body = serde_json::json!({
         "ok": true,
-        "dry_run": true,
+        "dry_run": payout_result.dry_run,
         "message": "claim accepted in dry-run mode",
         "address": address,
         "amount": state.config.claim_amount,
-        "tx_hash": serde_json::Value::Null,
+        "tx_hash": tx_hash,
     });
 
     Ok(Json(body))
@@ -187,6 +206,26 @@ fn db_error() -> (StatusCode, Json<ClaimErrResponse>) {
             error: "database_error",
         }),
     )
+}
+
+fn map_payout_error(err: PayoutError) -> (StatusCode, Json<ClaimErrResponse>) {
+    match err {
+        PayoutError::Disabled | PayoutError::Misconfigured => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ClaimErrResponse {
+                ok: false,
+                error: "payouts_not_enabled",
+            }),
+        ),
+        PayoutError::Rejected => (
+            StatusCode::BAD_REQUEST,
+            Json(ClaimErrResponse {
+                ok: false,
+                error: "invalid_address",
+            }),
+        ),
+        PayoutError::BackendUnavailable | PayoutError::Internal => db_error(),
+    }
 }
 
 async fn claim(
@@ -217,6 +256,7 @@ pub fn app_router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::payout::default_payout_adapter;
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
@@ -239,6 +279,7 @@ mod tests {
         let state = AppState {
             config: config.clone(),
             pool,
+            payout: default_payout_adapter(),
         };
         let app = app_router(state.clone());
         (app, state)
@@ -307,6 +348,7 @@ mod tests {
         let app = app_router(AppState {
             config: Arc::new(config),
             pool,
+            payout: default_payout_adapter(),
         });
 
         let req = Request::builder()
@@ -321,6 +363,33 @@ mod tests {
         assert!(json.get("wallet_seed_path").is_none());
         assert!(json.get("node_cli_path").is_none());
         assert!(json.get("node_data_dir").is_none());
+    }
+
+    #[tokio::test]
+    async fn claim_uses_dry_run_adapter_status_in_db() {
+        let (_, state) = test_app(true, 3600, 3600).await;
+
+        let _ = process_claim(
+            &state,
+            "10.0.0.50",
+            ClaimRequest {
+                address: "adapter_test_addr".to_string(),
+            },
+        )
+        .await
+        .expect("claim");
+
+        let status: String = sqlx::query_scalar("SELECT status FROM claims LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("status");
+        assert_eq!(status, "dry_run_accepted");
+
+        let dry_run: i64 = sqlx::query_scalar("SELECT dry_run FROM claims LIMIT 1")
+            .fetch_one(&state.pool)
+            .await
+            .expect("dry_run");
+        assert_eq!(dry_run, 1);
     }
 
     #[tokio::test]

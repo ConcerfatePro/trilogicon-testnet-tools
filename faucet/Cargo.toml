@@ -6,6 +6,7 @@ description = "TRIL testnet faucet backend (dry-run MVP)"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1"
 axum = { version = "0.8", features = ["json"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
