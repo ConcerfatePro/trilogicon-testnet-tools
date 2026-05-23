@@ -42,6 +42,24 @@ Wallet seeds, CAPTCHA, and node integration are intentionally **not** implemente
 
 Before real testnet payouts are enabled, read the safety plan: **[docs/faucet_secret_config_plan.md](docs/faucet_secret_config_plan.md)**. It covers threat model, fail-closed startup rules, secret storage, logging boundaries, and phased implementation (3a–3e). **This milestone does not enable payouts or load seeds.**
 
+### Payout-related configuration (MVP 3a, config only)
+
+MVP 3a adds future payout-related environment variables to the config layer. They are **parsed and validated only**—no TRIL is sent, no seed files are opened, and no CLI or node integration exists.
+
+| Variable | Default | MVP 3a behavior |
+|----------|---------|-----------------|
+| `FAUCET_ENABLE_PAYOUTS` | `false` | **Must stay `false`.** Setting `true` fails startup (reserved for a later payout milestone). |
+| `FAUCET_NETWORK` | `testnet` | Must be `testnet`; any other value fails startup. |
+| `FAUCET_WALLET_SEED_PATH` | _(unset)_ | Parsed/stored only; file is **not** read. |
+| `FAUCET_NODE_MODE` | `disabled` | One of `disabled`, `cli`, `rpc`; no node behavior yet. |
+| `FAUCET_NODE_CLI_PATH` | _(unset)_ | Parsed/stored only. |
+| `FAUCET_NODE_DATA_DIR` | _(unset)_ | Parsed/stored only. |
+| `FAUCET_FIXED_FEE` | `1` | Must be positive. |
+| `FAUCET_MAX_DAILY_CLAIMS` | `1000` | Must be positive. |
+| `FAUCET_MAX_DAILY_AMOUNT` | `10000` | Must be positive. |
+
+`GET /api/status` exposes safe fields (`payouts_enabled`, `network`, `node_mode`) and **does not** expose seed paths, CLI paths, or node data directories. `FAUCET_DRY_RUN=false` still returns `payouts_not_enabled` on claim requests.
+
 ### Example `curl` commands
 
 Health:

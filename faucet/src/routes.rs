@@ -37,6 +37,9 @@ pub struct StatusResponse {
     pub claim_amount: i64,
     pub cooldown_seconds: i64,
     pub ip_cooldown_seconds: i64,
+    pub payouts_enabled: bool,
+    pub network: String,
+    pub node_mode: String,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +92,9 @@ async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
         claim_amount: state.config.claim_amount,
         cooldown_seconds: state.config.cooldown_seconds,
         ip_cooldown_seconds: state.config.ip_cooldown_seconds,
+        payouts_enabled: state.config.payouts_enabled_status(),
+        network: state.config.network.as_str().to_string(),
+        node_mode: state.config.node_mode.as_str().to_string(),
     })
 }
 
@@ -216,14 +222,11 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_config(dry_run: bool, cooldown_seconds: i64, ip_cooldown_seconds: i64) -> Arc<Config> {
-        Arc::new(Config {
-            bind_addr: "127.0.0.1:0".to_string(),
-            database_url: "sqlite::memory:".to_string(),
+        Arc::new(Config::test_defaults(
             dry_run,
-            claim_amount: 10,
             cooldown_seconds,
             ip_cooldown_seconds,
-        })
+        ))
     }
 
     async fn test_app(
@@ -272,7 +275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_includes_ip_cooldown_seconds() {
+    async fn status_includes_safe_payout_config_fields() {
         let (app, _) = test_app(true, 3600, 7200).await;
         let req = Request::builder()
             .uri("/api/status")
@@ -286,6 +289,12 @@ mod tests {
         assert_eq!(json["ok"], true);
         assert_eq!(json["ip_cooldown_seconds"], 7200);
         assert_eq!(json["cooldown_seconds"], 3600);
+        assert_eq!(json["payouts_enabled"], false);
+        assert_eq!(json["network"], "testnet");
+        assert_eq!(json["node_mode"], "disabled");
+        assert!(json.get("wallet_seed_path").is_none());
+        assert!(json.get("node_cli_path").is_none());
+        assert!(json.get("node_data_dir").is_none());
     }
 
     #[tokio::test]
