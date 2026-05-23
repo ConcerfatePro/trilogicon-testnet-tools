@@ -194,9 +194,9 @@ Each phase requires tests and clippy clean; prior dry-run behavior remains until
 ## 12. Non-goals
 
 - **No mainnet** support or configuration.
-- **No real payouts** in MVP 3 (documentation only).
+- **No real payouts** in MVP 3d
 - **No seed loading** before MVP 3d.
-- **No Trilogicon node or CLI integration** in MVP 3.
+- **No Trilogicon node or CLI integration** in MVP 3d.
 - **No frontend** work.
 - **No CAPTCHA** unless separately scoped.
 - **No changes to `trilogicon-core`.**
