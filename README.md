@@ -70,6 +70,10 @@ MVP 3c adds an internal `PayoutAdapter` trait and a `DryRunPayoutAdapter` implem
 - `FAUCET_ENABLE_PAYOUTS=true` still fails startup.
 - Real testnet payouts remain a later milestone (MVP 3d).
 
+### Local testnet payout design (MVP 3d-prep)
+
+Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**
+
 ### Example `curl` commands
 
 Health:
