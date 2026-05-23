@@ -38,6 +38,10 @@ Each claim stores the client IP in the `claims.ip` column. In local/dev mode the
 
 Wallet seeds, CAPTCHA, and node integration are intentionally **not** implemented in this skeleton.
 
+### Secret and payout configuration (MVP 3)
+
+Before real testnet payouts are enabled, read the safety plan: **[docs/faucet_secret_config_plan.md](docs/faucet_secret_config_plan.md)**. It covers threat model, fail-closed startup rules, secret storage, logging boundaries, and phased implementation (3a–3e). **This milestone does not enable payouts or load seeds.**
+
 ### Example `curl` commands
 
 Health:
