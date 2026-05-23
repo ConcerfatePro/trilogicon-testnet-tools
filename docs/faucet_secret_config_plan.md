@@ -182,7 +182,7 @@ Use this checklist before enabling real testnet payouts (after MVP 3d implementa
 | **MVP 3 (this doc)** | Secret/config safety plan, README link | No | No |
 | **MVP 3a** | Config types and parsing for future vars; defaults fail-safe | No | No |
 | **MVP 3b** | Seed path resolution; refuse in-repo paths; still no payout | No | No (validate path only) |
-| **MVP 3c** | CLI/RPC **adapter trait**; dry-run stub returns fake/null tx id | No real send | Optional read for address preview only |
+| **MVP 3c** | CLI/RPC **adapter trait**; dry-run stub returns fake/null tx id | No real send | No seed read; address preview must use a non-secret mock/configured public address |
 | **MVP 3d** | Real testnet payout behind all gates in Section 4 | Yes (testnet only) | Yes |
 | **MVP 3e** | Deployment hardening: reverse proxy, TLS, OS secrets, monitoring | Yes | Yes |
 
