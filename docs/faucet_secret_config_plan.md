@@ -118,15 +118,15 @@ Use structured logging levels: `info` for claim outcomes, `warn` for limit hits,
 
 ---
 
-## 8. Configuration proposal (not implemented yet)
+## 8. Configuration proposal and parsed fields
 
-Future environment variables for payout eras. **Do not implement in MVP 3**; document only.
+Future environment variables for payout eras. MVP 3a parses these values with fail-safe defaults. MVP 3b validates the wallet seed path string boundary only. Neither milestone reads seed contents, opens seed files, sends TRIL, or connects to a node.
 
 | Variable | Default (proposed) | Role |
 |----------|------------------|------|
 | `FAUCET_ENABLE_PAYOUTS` | `false` | Master switch for real sends; must pair with `FAUCET_DRY_RUN=false`. |
 | `FAUCET_NETWORK` | `testnet` | Canonical network id; startup fails if not testnet when payouts enabled. |
-| `FAUCET_WALLET_SEED_PATH` | _(unset)_ | Path to seed file **outside repo**; required when payouts enabled. |
+| `FAUCET_WALLET_SEED_PATH` | _(unset)_ | Optional until payouts exist. If set in MVP 3b, it must be an absolute path **outside repo** with no `..` traversal; the file is not read. Required only when future payouts are enabled. |
 | `FAUCET_NODE_MODE` | _(unset)_ | `cli` or `rpc` — how to reach Trilogicon node (future). |
 | `FAUCET_NODE_CLI_PATH` | _(unset)_ | Path to Trilogicon CLI binary when `NODE_MODE=cli`. |
 | `FAUCET_NODE_DATA_DIR` | _(unset)_ | Node data directory for CLI/RPC context. |
@@ -148,7 +148,7 @@ When payout mode is requested, the process **must exit non-zero** at startup if 
 | `FAUCET_DRY_RUN=false` and `FAUCET_ENABLE_PAYOUTS=false` | Refuse start (would imply “live” without enable switch). |
 | `FAUCET_ENABLE_PAYOUTS=true` and `FAUCET_NETWORK` ≠ `testnet` | Refuse start. |
 | Payouts enabled and seed missing / unreadable | Refuse start. |
-| Resolved seed path inside git repository root | Refuse start. |
+| Resolved seed path inside git repository root | Refuse start. MVP 3b enforces this lexically without reading or canonicalizing the file. |
 | Address or IP cooldown seconds are `0` while payouts enabled | Refuse start (limits disabled). |
 | `FAUCET_CLAIM_AMOUNT` ≤ 0 | Refuse start. |
 | Database unavailable | Refuse start. |
@@ -181,7 +181,7 @@ Use this checklist before enabling real testnet payouts (after MVP 3d implementa
 |-------|--------|---------|-----------|
 | **MVP 3 (this doc)** | Secret/config safety plan, README link | No | No |
 | **MVP 3a** | Config types and parsing for future vars; defaults fail-safe (**implemented**) | No | No |
-| **MVP 3b** | Seed path resolution; refuse in-repo paths; still no payout | No | No (validate path only) |
+| **MVP 3b** | Seed path boundary validation; require absolute out-of-repo paths; still no payout (**implemented**) | No | No (validate path only; do not open file) |
 | **MVP 3c** | CLI/RPC **adapter trait**; dry-run stub returns fake/null tx id | No real send | No seed read; address preview must use a non-secret mock/configured public address |
 | **MVP 3d** | Real testnet payout behind all gates in Section 4 | Yes (testnet only) | Yes |
 | **MVP 3e** | Deployment hardening: reverse proxy, TLS, OS secrets, monitoring | Yes | Yes |
@@ -194,7 +194,7 @@ Each phase requires tests and clippy clean; prior dry-run behavior remains until
 
 - **No mainnet** support or configuration.
 - **No real payouts** in MVP 3 (documentation only).
-- **No seed loading** in MVP 3.
+- **No seed loading** before MVP 3d.
 - **No Trilogicon node or CLI integration** in MVP 3.
 - **No frontend** work.
 - **No CAPTCHA** unless separately scoped.

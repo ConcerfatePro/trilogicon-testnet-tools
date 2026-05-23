@@ -42,15 +42,15 @@ Wallet seeds, CAPTCHA, and node integration are intentionally **not** implemente
 
 Before real testnet payouts are enabled, read the safety plan: **[docs/faucet_secret_config_plan.md](docs/faucet_secret_config_plan.md)**. It covers threat model, fail-closed startup rules, secret storage, logging boundaries, and phased implementation (3a–3e). **This milestone does not enable payouts or load seeds.**
 
-### Payout-related configuration (MVP 3a, config only)
+### Payout-related configuration (MVP 3b, validation only)
 
-MVP 3a adds future payout-related environment variables to the config layer. They are **parsed and validated only**—no TRIL is sent, no seed files are opened, and no CLI or node integration exists.
+MVP 3b keeps future payout-related environment variables in the config layer and adds wallet seed path boundary validation. They are **parsed and validated only**—no TRIL is sent, no seed files are opened, and no CLI or node integration exists.
 
-| Variable | Default | MVP 3a behavior |
+| Variable | Default | MVP 3b behavior |
 |----------|---------|-----------------|
 | `FAUCET_ENABLE_PAYOUTS` | `false` | **Must stay `false`.** Setting `true` fails startup (reserved for a later payout milestone). |
 | `FAUCET_NETWORK` | `testnet` | Must be `testnet`; any other value fails startup. |
-| `FAUCET_WALLET_SEED_PATH` | _(unset)_ | Parsed/stored only; file is **not** read. |
+| `FAUCET_WALLET_SEED_PATH` | _(unset)_ | Optional; if set, must be an absolute path outside this repository with no `..` traversal. The file is **not** read. |
 | `FAUCET_NODE_MODE` | `disabled` | One of `disabled`, `cli`, `rpc`; no node behavior yet. |
 | `FAUCET_NODE_CLI_PATH` | _(unset)_ | Parsed/stored only. |
 | `FAUCET_NODE_DATA_DIR` | _(unset)_ | Parsed/stored only. |

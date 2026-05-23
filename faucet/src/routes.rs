@@ -298,6 +298,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn status_excludes_configured_secret_paths() {
+        let pool = db::connect("sqlite::memory:").await.expect("connect");
+        let mut config = Config::test_defaults(true, 3600, 3600);
+        config.wallet_seed_path = Some("/etc/trilogicon/faucet/wallet.seed".to_string());
+        config.node_cli_path = Some("/usr/local/bin/trilogicon".to_string());
+        config.node_data_dir = Some("/var/lib/trilogicon-testnet".to_string());
+        let app = app_router(AppState {
+            config: Arc::new(config),
+            pool,
+        });
+
+        let req = Request::builder()
+            .uri("/api/status")
+            .body(Body::empty())
+            .expect("request");
+        let resp = app.oneshot(req).await.expect("status");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert!(json.get("wallet_seed_path").is_none());
+        assert!(json.get("node_cli_path").is_none());
+        assert!(json.get("node_data_dir").is_none());
+    }
+
+    #[tokio::test]
     async fn dry_run_disabled_returns_payouts_not_enabled() {
         let (_, state) = test_app(false, 3600, 3600).await;
         assert_eq!(claim_count(&state.pool).await, 0);

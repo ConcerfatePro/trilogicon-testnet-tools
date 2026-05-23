@@ -1,6 +1,7 @@
 //! Environment-backed configuration with safe defaults.
 
 use std::env;
+use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8787";
 const DEFAULT_DATABASE_URL: &str = "sqlite:faucet.db";
@@ -16,7 +17,7 @@ const DEFAULT_MAX_DAILY_CLAIMS: i64 = 1000;
 const DEFAULT_MAX_DAILY_AMOUNT: i64 = 10000;
 
 const ENABLE_PAYOUTS_RESERVED_MSG: &str =
-    "FAUCET_ENABLE_PAYOUTS is reserved for a later payout milestone; MVP 3a is config-only";
+    "FAUCET_ENABLE_PAYOUTS is reserved for a later payout milestone; MVP 3b is validation-only";
 
 /// Supported faucet network identifiers (MVP 3a: testnet only).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,15 +89,83 @@ pub struct Config {
     pub max_daily_amount: i64,
 }
 
-/// Heuristic for MVP 3b path validation; not applied at startup in MVP 3a.
-#[allow(dead_code)] // wired at startup in MVP 3b
-pub fn seed_path_looks_inside_repo(path: &str) -> bool {
-    let p = path.trim();
-    if p.is_empty() {
-        return false;
+/// Lexical seed path safety summary. This never reads or canonicalizes the path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedPathSafety {
+    pub is_empty: bool,
+    pub is_absolute: bool,
+    pub has_relative_traversal: bool,
+    pub looks_inside_repo: bool,
+    pub under_ignored_runtime_path: bool,
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("faucet crate lives under repo root")
+        .to_path_buf()
+}
+
+fn normalize_without_parent_dirs(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::ParentDir => normalized.push(component.as_os_str()),
+        }
     }
-    // Relative paths are treated as potentially inside the repo working tree.
-    !(p.starts_with('/') || p.starts_with('\\'))
+    normalized
+}
+
+pub fn seed_path_safety(path: &str) -> SeedPathSafety {
+    let trimmed = path.trim();
+    let path = Path::new(trimmed);
+    let is_empty = trimmed.is_empty();
+    let is_absolute = path.is_absolute();
+    let has_relative_traversal = path.components().any(|c| matches!(c, Component::ParentDir));
+    let normalized_path = normalize_without_parent_dirs(path);
+    let repo_root = normalize_without_parent_dirs(&repo_root());
+    let looks_inside_repo = is_absolute && normalized_path.starts_with(repo_root);
+    let under_ignored_runtime_path = looks_inside_repo
+        && normalized_path.components().any(|component| {
+            matches!(
+                component.as_os_str().to_str(),
+                Some(".env" | "wallet.seed" | "faucet.db" | "target")
+            )
+        });
+
+    SeedPathSafety {
+        is_empty,
+        is_absolute,
+        has_relative_traversal,
+        looks_inside_repo,
+        under_ignored_runtime_path,
+    }
+}
+
+fn validate_wallet_seed_path(path: Option<String>) -> Result<Option<String>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+
+    let safety = seed_path_safety(&path);
+    if safety.is_empty {
+        return Ok(None);
+    }
+    if !safety.is_absolute {
+        return Err("FAUCET_WALLET_SEED_PATH must be an absolute path outside this repository; seed files are not read in MVP 3b".to_string());
+    }
+    if safety.has_relative_traversal {
+        return Err("FAUCET_WALLET_SEED_PATH must not contain relative traversal; seed files are not read in MVP 3b".to_string());
+    }
+    if safety.looks_inside_repo || safety.under_ignored_runtime_path {
+        return Err("FAUCET_WALLET_SEED_PATH must point outside this repository; seed files are not read in MVP 3b".to_string());
+    }
+
+    Ok(Some(path))
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
@@ -200,7 +269,8 @@ impl Config {
 
         let network = Network::parse(&env_string("FAUCET_NETWORK", DEFAULT_NETWORK)?)?;
 
-        let wallet_seed_path = env_optional_string("FAUCET_WALLET_SEED_PATH")?;
+        let wallet_seed_path =
+            validate_wallet_seed_path(env_optional_string("FAUCET_WALLET_SEED_PATH")?)?;
         let node_mode = NodeMode::parse(&env_string("FAUCET_NODE_MODE", DEFAULT_NODE_MODE)?)?;
         let node_cli_path = env_optional_string("FAUCET_NODE_CLI_PATH")?;
         let node_data_dir = env_optional_string("FAUCET_NODE_DATA_DIR")?;
@@ -356,7 +426,7 @@ mod tests {
         env::set_var("FAUCET_ENABLE_PAYOUTS", "true");
         let err = Config::from_env().expect_err("enable payouts");
         assert!(err.contains("FAUCET_ENABLE_PAYOUTS"));
-        assert!(err.contains("MVP 3a"));
+        assert!(err.contains("MVP 3b"));
     }
 
     #[test]
@@ -396,7 +466,15 @@ mod tests {
     }
 
     #[test]
-    fn wallet_seed_path_parses_without_reading() {
+    fn absent_wallet_seed_path_is_ok() {
+        let _g = env_lock();
+        clear_faucet_env();
+        let c = Config::from_env().expect("missing seed path is still ok");
+        assert!(c.wallet_seed_path.is_none());
+    }
+
+    #[test]
+    fn wallet_seed_path_absolute_outside_repo_is_accepted_without_reading() {
         let _g = env_lock();
         clear_faucet_env();
         env::set_var(
@@ -411,13 +489,47 @@ mod tests {
     }
 
     #[test]
-    fn seed_path_looks_inside_repo_relative() {
-        assert!(seed_path_looks_inside_repo("wallet.seed"));
-        assert!(seed_path_looks_inside_repo("./secrets/wallet.seed"));
+    fn wallet_seed_path_relative_is_rejected() {
+        let _g = env_lock();
+        clear_faucet_env();
+        env::set_var("FAUCET_WALLET_SEED_PATH", "wallet.seed");
+        let err = Config::from_env().expect_err("relative seed path");
+        assert!(err.contains("FAUCET_WALLET_SEED_PATH"));
+        assert!(err.contains("absolute path"));
     }
 
     #[test]
-    fn seed_path_looks_inside_repo_absolute() {
-        assert!(!seed_path_looks_inside_repo("/etc/trilogicon/wallet.seed"));
+    fn wallet_seed_path_in_repo_is_rejected() {
+        let _g = env_lock();
+        clear_faucet_env();
+        let in_repo = repo_root().join("wallet.seed");
+        env::set_var("FAUCET_WALLET_SEED_PATH", in_repo);
+        let err = Config::from_env().expect_err("in-repo seed path");
+        assert!(err.contains("FAUCET_WALLET_SEED_PATH"));
+        assert!(err.contains("outside this repository"));
+    }
+
+    #[test]
+    fn wallet_seed_path_traversal_is_rejected() {
+        let _g = env_lock();
+        clear_faucet_env();
+        env::set_var("FAUCET_WALLET_SEED_PATH", "/etc/trilogicon/../wallet.seed");
+        let err = Config::from_env().expect_err("traversal seed path");
+        assert!(err.contains("FAUCET_WALLET_SEED_PATH"));
+        assert!(err.contains("relative traversal"));
+    }
+
+    #[test]
+    fn seed_path_safety_reports_boundaries() {
+        let in_repo = repo_root().join("faucet").join(".env");
+        let safety = seed_path_safety(in_repo.to_str().expect("utf-8 test path"));
+        assert!(!safety.is_empty);
+        assert!(safety.is_absolute);
+        assert!(safety.looks_inside_repo);
+        assert!(safety.under_ignored_runtime_path);
+
+        let outside = seed_path_safety("/etc/trilogicon/wallet.seed");
+        assert!(outside.is_absolute);
+        assert!(!outside.looks_inside_repo);
     }
 }
