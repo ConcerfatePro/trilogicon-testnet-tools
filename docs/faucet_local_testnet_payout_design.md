@@ -295,6 +295,7 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | **MVP 3d-2b** | Align argv builder with verified core `node send` syntax; optional `--genesis`; document queue vs sealed semantics; no subprocess (**implemented**) | No | No |
 | **MVP 3d-2c** | Payout status model + DB state design doc; inert status constants; no runtime change (**implemented**) | No | No |
 | **MVP 3d-2d** | Payout worker + locking design doc; no execution (**implemented**) | No | No |
+| **MVP 3d-2e** | Payout DB schema + migration design doc; no migration code (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |
@@ -332,5 +333,6 @@ Each phase requires tests and `cargo clippy -- -D warnings` clean from `faucet/`
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
 - [faucet_payout_status_model.md](faucet_payout_status_model.md)
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
+- [faucet_payout_db_design.md](faucet_payout_db_design.md)
 - Faucet payout module: `faucet/src/payout.rs` (`PayoutAdapter`, `DryRunPayoutAdapter`, `claim_status`)
 - Config: `faucet/src/config.rs`

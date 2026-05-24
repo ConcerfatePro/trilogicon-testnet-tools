@@ -9,6 +9,7 @@ It is a **documentation-first** milestone (MVP 3d-2d). Reading or following this
 Related documents:
 
 - [faucet_payout_status_model.md](faucet_payout_status_model.md) — status vocabulary, DB columns, queue vs confirmation
+- [faucet_payout_db_design.md](faucet_payout_db_design.md) — schema expansion, migrations, indexes, idempotency
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md) — CLI adapter flow, argv shape, phased rollout
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — secrets, fail-closed startup, operator checklist
 - Faucet payout module: `faucet/src/payout.rs`
@@ -17,7 +18,7 @@ Related documents:
 
 ## 2. Current state
 
-As of MVP 3d-2c:
+As of MVP 3d-2e:
 
 | Area | Status |
 |------|--------|
@@ -27,7 +28,7 @@ As of MVP 3d-2c:
 | `build_cli_send_args` | Tested; matches verified `node send` syntax |
 | Status model | [faucet_payout_status_model.md](faucet_payout_status_model.md) defines vocabulary |
 | Real payouts | **None** — no CLI, no seeds, no TRIL |
-| DB migration | **None** — schema still has `id`, `address`, `ip`, `amount`, `dry_run`, `status`, `created_at` |
+| DB migration | **None** — future design: [faucet_payout_db_design.md](faucet_payout_db_design.md) |
 | Payout worker | **Not implemented** |
 | `FAUCET_ENABLE_PAYOUTS=true` | **Fails startup** |
 
@@ -243,7 +244,9 @@ Suggested worker timeout: configurable (e.g. 30–60s for local MVP); log timeou
 
 ## 9. Suggested future DB columns
 
-Full status semantics: [faucet_payout_status_model.md](faucet_payout_status_model.md). Additional worker-specific columns:
+Full column definitions, indexes, and migration strategy: **[faucet_payout_db_design.md](faucet_payout_db_design.md)**.
+
+Summary (worker-relevant):
 
 | Column | Type | Purpose |
 |--------|------|---------|
@@ -259,7 +262,7 @@ Full status semantics: [faucet_payout_status_model.md](faucet_payout_status_mode
 | `worker_started_at` | TEXT NULL | When worker began processing row |
 | `worker_id` | TEXT NULL | Process instance id / UUID for debugging |
 
-**Do not implement migration in MVP 3d-2d.** Add with worker in MVP 3d-3 or dedicated migration step.
+**Do not implement migration in MVP 3d-2d/3d-2e.** Add with worker in MVP 3d-3 per [faucet_payout_db_design.md](faucet_payout_db_design.md).
 
 Optional transient status `payout_in_progress` may replace `worker_started_at` guard — decide in 3d-3 implementation.
 
@@ -378,6 +381,7 @@ Confirmation checker and explorer integration are **later work** (post 3d-3).
 ## References
 
 - [faucet_payout_status_model.md](faucet_payout_status_model.md)
+- [faucet_payout_db_design.md](faucet_payout_db_design.md)
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md)
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
 - Payout module: `faucet/src/payout.rs`

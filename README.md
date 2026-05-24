@@ -105,6 +105,10 @@ Before implementing real payout execution, read: **[docs/faucet_payout_status_mo
 
 Before implementing CLI execution, read: **[docs/faucet_payout_worker_design.md](docs/faucet_payout_worker_design.md)**. It defines the future single-worker model, locking options (in-process mutex, SQLite row locks, file lock on node data dir), timeout → `payout_unknown` rules, startup reconciliation, and duplicate-payout prevention. **No worker or execution code exists yet.**
 
+### Payout database design (MVP 3d-2e)
+
+Before implementing schema migrations, read: **[docs/faucet_payout_db_design.md](docs/faucet_payout_db_design.md)**. It defines future `claims` table columns (`tx_hash`, `idempotency_key`, `worker_id`, …), indexes, idempotency strategy, worker row-claiming SQL, and migration versioning. **No migration or schema change exists yet.**
+
 ### Local testnet payout design (MVP 3d-prep)
 
 Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**

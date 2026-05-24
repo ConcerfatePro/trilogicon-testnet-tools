@@ -10,6 +10,7 @@ Related documents:
 
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md) — CLI adapter flow, argv shape, phased rollout
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md) — worker serialization, locking, timeout handling
+- [faucet_payout_db_design.md](faucet_payout_db_design.md) — schema expansion, migrations, indexes, idempotency
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — secrets, fail-closed startup, operator checklist
 - Faucet payout module: `faucet/src/payout.rs`
 
@@ -17,7 +18,7 @@ Related documents:
 
 ## 2. Current state
 
-As of MVP 3d-2d, the faucet backend behaves as follows:
+As of MVP 3d-2e, the faucet backend behaves as follows:
 
 | Area | Behavior |
 |------|----------|
@@ -176,7 +177,9 @@ This table is **sufficient for dry-run** but **insufficient for real payouts** w
 | Backend identifier (`cli` vs `rpc`) | **Missing** |
 | Status updates after insert | **Missing** — no `updated_at` |
 
-### Future columns to consider (design only — no migration in 3d-2c)
+### Future columns to consider (design only — no migration in 3d-2c/3d-2e)
+
+Canonical definitions, indexes, and migration plan: **[faucet_payout_db_design.md](faucet_payout_db_design.md)**.
 
 | Column | Type | Purpose |
 |--------|------|---------|
@@ -194,7 +197,7 @@ This table is **sufficient for dry-run** but **insufficient for real payouts** w
 
 Worker lifecycle and locking: [faucet_payout_worker_design.md](faucet_payout_worker_design.md).
 
-**Recommendation:** Add columns in a dedicated migration milestone (3d-3 or 3d-4) together with the payout worker.
+**Recommendation:** Add columns in MVP 3d-3 together with migration `001` per [faucet_payout_db_design.md](faucet_payout_db_design.md).
 
 ### Index considerations (future)
 
@@ -402,6 +405,7 @@ For dry-run operations today, reconciliation is trivial: all rows are `dry_run_a
 
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md)
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
+- [faucet_payout_db_design.md](faucet_payout_db_design.md)
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
 - Status constants (inert): `faucet/src/payout.rs` (`claim_status` module)
 - Claims schema: `faucet/src/db.rs`
