@@ -107,7 +107,11 @@ Before implementing CLI execution, read: **[docs/faucet_payout_worker_design.md]
 
 ### Payout database design (MVP 3d-2e)
 
-Before implementing schema migrations, read: **[docs/faucet_payout_db_design.md](docs/faucet_payout_db_design.md)**. It defines future `claims` table columns (`tx_hash`, `idempotency_key`, `worker_id`, …), indexes, idempotency strategy, worker row-claiming SQL, and migration versioning. **No migration or schema change exists yet.**
+Before implementing schema migrations, read: **[docs/faucet_payout_db_design.md](docs/faucet_payout_db_design.md)**. It defines `claims` payout columns, indexes, idempotency strategy, and migration versioning.
+
+### Database migration 001 (MVP 3d-3a)
+
+Migration **001** is implemented in `faucet/src/db.rs`: `schema_migrations` table, payout-tracking columns on `claims`, and future indexes. Startup fails closed on migration errors. **Dry-run claims and `/api/claim` behavior are unchanged** — new columns are unused. Payout worker and CLI execution remain future work. `FAUCET_ENABLE_PAYOUTS=true` still fails startup.
 
 ### Local payout readiness checklist (MVP 3d-2f)
 

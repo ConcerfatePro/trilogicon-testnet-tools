@@ -35,9 +35,10 @@ The following milestones are **complete** (design and/or code as noted). The fau
 | MVP 3d-2c | Payout status model | No |
 | MVP 3d-2d | Payout worker / locking design | No |
 | MVP 3d-2e | Payout DB schema / migration design | No |
-| **MVP 3d-2f** | **This readiness checklist** | No |
+| MVP 3d-2f | This readiness checklist | No |
+| **MVP 3d-3a** | **DB migration 001 + payout columns (unused)** | No |
 
-**Not yet implemented:** DB migration, payout worker, CLI subprocess, real payouts, seed reading by faucet.
+**Not yet implemented:** payout worker, CLI subprocess, real payouts, seed reading by faucet, `payout_requested` claim flow.
 
 ---
 
@@ -47,7 +48,7 @@ All items below must be **implemented and tested** before local CLI execution (M
 
 | # | Blocker | Reference |
 |---|---------|-----------|
-| 1 | DB migration `001` implemented and tested | [faucet_payout_db_design.md](faucet_payout_db_design.md) |
+| 1 | ~~DB migration `001` implemented and tested~~ | **Done (MVP 3d-3a)** — [faucet_payout_db_design.md](faucet_payout_db_design.md) |
 | 2 | `payout_requested` row insertion path in claim handler | [faucet_payout_status_model.md](faucet_payout_status_model.md) |
 | 3 | Single payout worker (one payout at a time) | [faucet_payout_worker_design.md](faucet_payout_worker_design.md) |
 | 4 | Worker row claiming (conditional `UPDATE`) | [faucet_payout_db_design.md §7](faucet_payout_db_design.md#7-worker-claiming-strategy) |
@@ -110,16 +111,18 @@ Operator must fund the faucet wallet with a **limited** testnet TRIL balance bef
 
 ## 6. DB readiness checklist
 
-Before first real payout:
+Before first real payout (Section 6 — **complete as of MVP 3d-3a** for schema only):
 
-- [ ] `schema_migrations` table introduced
-- [ ] Migration `001` adds payout tracking columns per [faucet_payout_db_design.md](faucet_payout_db_design.md)
-- [ ] Migration is **idempotent** (safe re-run or version-guarded)
-- [ ] Startup **fails closed** on migration error (process exits non-zero)
-- [ ] Tests cover **fresh DB** (create from scratch)
-- [ ] Tests cover **existing DB upgrade** (dry-run rows preserved)
-- [ ] **No data loss** for existing `dry_run_accepted` claims
-- [ ] Indexes created: `idempotency_key`, `status+created_at`, `address+created_at`, `ip+created_at`, partial `tx_hash`
+- [x] `schema_migrations` table introduced
+- [x] Migration `001` adds payout tracking columns per [faucet_payout_db_design.md](faucet_payout_db_design.md)
+- [x] Migration is **idempotent** (safe re-run or version-guarded)
+- [x] Startup **fails closed** on migration error (process exits non-zero)
+- [x] Tests cover **fresh DB** (create from scratch)
+- [x] Tests cover **existing DB upgrade** (dry-run rows preserved)
+- [x] **No data loss** for existing `dry_run_accepted` claims
+- [x] Indexes created: `idempotency_key`, `status+created_at`, `address+created_at`, `ip+created_at`, partial `tx_hash`
+
+Columns are present but **not yet used** for real payout flow. Worker, row claiming, and CLI execution remain blockers.
 
 ---
 

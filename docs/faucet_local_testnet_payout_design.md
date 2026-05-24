@@ -298,6 +298,7 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | **MVP 3d-2d** | Payout worker + locking design doc; no execution (**implemented**) | No | No |
 | **MVP 3d-2e** | Payout DB schema + migration design doc; no migration code (**implemented**) | No | No |
 | **MVP 3d-2f** | Local payout readiness checklist; final pre-execution gate (**implemented**) | No | No |
+| **MVP 3d-3a** | DB migration 001 + payout columns (unused); dry-run unchanged (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |

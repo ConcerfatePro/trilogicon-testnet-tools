@@ -4,7 +4,7 @@
 
 This document designs the **future SQLite schema and migration strategy** needed for real testnet payout tracking in the Trilogicon faucet **before any migration code or CLI execution is added**.
 
-It is a **documentation-first** milestone (MVP 3d-2e). Reading or following this note does **not** alter the live `claims` table, change `/api/claim` behavior, or enable payouts. Migration implementation remains gated behind MVP 3d-3+.
+It is a **documentation-first** milestone (MVP 3d-2e). **Migration 001 was implemented in MVP 3d-3a** (`faucet/src/db.rs`); columns exist but are not yet used for real payouts. Worker and CLI execution remain future work.
 
 Related documents:
 
@@ -19,7 +19,9 @@ Related documents:
 
 ## 2. Current database state
 
-The faucet uses SQLite with a single `claims` table created via `CREATE TABLE IF NOT EXISTS` in `faucet/src/db.rs`:
+As of **MVP 3d-3a**, the faucet uses SQLite with versioned migrations in `faucet/src/db.rs`.
+
+### Base `claims` table (unchanged columns from MVP 1)
 
 ```sql
 CREATE TABLE IF NOT EXISTS claims (
@@ -33,23 +35,47 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 ```
 
-### Column usage today
+### Migration tracking (`schema_migrations`, MVP 3d-3a)
 
-| Column | Role |
-|--------|------|
-| `id` | Surrogate primary key; monotonic claim identifier |
-| `address` | Receiver address; per-address cooldown queries |
-| `ip` | Client IP string; per-IP cooldown queries |
-| `amount` | Claim amount (from config, not user-supplied) |
-| `dry_run` | `1` for dry-run; `0` reserved for future real payouts |
-| `status` | Always `dry_run_accepted` in current builds |
-| `created_at` | Insert timestamp; cooldown window anchor |
+```sql
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL  -- RFC3339 UTC
+);
+```
 
-### Sufficiency
+### Migration 001 — payout tracking columns (**implemented**)
 
-This schema is **enough for dry-run claims** (insert, rate limits, audit history). It is **not enough** for real payout execution, worker coordination, idempotency, or operator reconciliation.
+Added via idempotent `ALTER TABLE` (each column checked with `PRAGMA table_info(claims)` before add):
 
-There is **no schema versioning** table today; schema is implicit in `init_schema`.
+| Column | Type | Default |
+|--------|------|---------|
+| `tx_hash` | TEXT NULL | — |
+| `fee` | INTEGER NULL | — |
+| `error_code` | TEXT NULL | — |
+| `backend` | TEXT NULL | — |
+| `idempotency_key` | TEXT NULL | — |
+| `attempt_count` | INTEGER NOT NULL | `0` |
+| `queued_at` | TEXT NULL | — |
+| `confirmed_at` | TEXT NULL | — |
+| `updated_at` | TEXT NULL | — |
+| `worker_id` | TEXT NULL | — |
+| `worker_started_at` | TEXT NULL | — |
+
+Indexes (all `IF NOT EXISTS`):
+
+- `idx_claims_address_created` — `(address, created_at DESC)`
+- `idx_claims_ip_created` — `(ip, created_at DESC)`
+- `idx_claims_status_created` — `(status, created_at)`
+- `idx_claims_idempotency_key` — UNIQUE partial on `idempotency_key`
+- `idx_claims_tx_hash` — partial on `tx_hash`
+
+**Runtime usage today:** Dry-run inserts still write only the original columns; new columns remain NULL / default (`attempt_count = 0`). No payout worker or real payout flow uses them yet.
+
+### Legacy note (pre-3d-3a)
+
+Previously (MVP 3d-2e), only the base table existed with no `schema_migrations` table.
 
 ---
 
@@ -280,28 +306,15 @@ If `status = payout_requested` and `worker_started_at` older than threshold (e.g
 
 ## 8. Migration strategy
 
-### Current approach
+### Implemented (MVP 3d-3a)
 
-- `init_schema` runs `CREATE TABLE IF NOT EXISTS` on every connect.
-- No version table; no `ALTER TABLE` today.
-- Safe for greenfield dry-run deployments; insufficient for evolving payout schema.
+1. **`schema_migrations`** table with `version`, `name`, `applied_at`.
+2. **Migration 001** (`add_payout_tracking_columns`) runs at startup via `init_schema` → `run_migrations`.
+3. **Fail closed:** migration errors propagate from `connect()`; startup exits non-zero.
+4. **Idempotent:** migration 001 skipped if version row exists; columns added only when missing (`PRAGMA table_info`); indexes use `IF NOT EXISTS`.
+5. **Backfill:** if all migration 001 columns exist but the version row is missing, migration body runs (no-op column adds), indexes ensured, then version row recorded.
 
-### Future approach (MVP 3d-3)
-
-1. Introduce **`schema_migrations`** table:
-
-```sql
-CREATE TABLE IF NOT EXISTS schema_migrations (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL
-);
-```
-
-2. Apply numbered migrations idempotently at startup (e.g. `001_payout_columns.sql`).
-3. **Fail closed:** if any migration fails, log error and **exit non-zero** — do not serve claims with half-migrated schema.
-4. Each migration should be safe to re-run or use `IF NOT EXISTS` / pragma checks.
-
-### Example migration 001 (illustrative — not implemented)
+### Example migration 001 (implemented in Rust)
 
 ```sql
 -- 001_add_payout_columns.sql (design only)
@@ -333,7 +346,11 @@ CREATE INDEX IF NOT EXISTS idx_claims_tx_hash
   ON claims(tx_hash) WHERE tx_hash IS NOT NULL;
 ```
 
-SQLite `ALTER TABLE ADD COLUMN` is additive and preserves existing rows (dry-run history intact).
+SQLite `ALTER TABLE ADD COLUMN` is additive and preserves existing rows (dry-run history intact). See `apply_migration_001` in `faucet/src/db.rs`.
+
+### Future migrations
+
+Migration 002+ (worker state, confirmation fields usage, etc.) will follow the same version-guarded pattern.
 
 ### Operational guidance
 
@@ -343,7 +360,7 @@ SQLite `ALTER TABLE ADD COLUMN` is additive and preserves existing rows (dry-run
 | Staging / public | **Backup DB** before migration; test migration on copy first |
 | Rollback | Keep down migrations or restore backup; do not drop columns in production hastily |
 
-**Do not implement migration in MVP 3d-2e/3d-2f.** Add with worker in MVP 3d-3 only after [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md) Section 6 is satisfied.
+Worker and CLI execution remain **not implemented** (MVP 3d-3b+).
 
 ---
 
