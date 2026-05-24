@@ -185,7 +185,8 @@ Use this checklist before enabling real testnet payouts (after MVP 3d implementa
 | **MVP 3c** | `PayoutAdapter` trait + `DryRunPayoutAdapter` only; claim flow uses adapter shape; no real send (**implemented**) | No real send | No seed read |
 | **MVP 3d-prep** | Local testnet payout design note ([faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md)); no execution (**implemented**) | No | No |
 | **MVP 3d-1** | `CliPayoutAdapter` skeleton + `build_cli_send_args`; execution disabled (**implemented**) | No | No |
-| **MVP 3d** | Real testnet payout behind all gates in Section 4 and the [local payout design note](faucet_local_testnet_payout_design.md) (3d-2…3d-5) | Yes (testnet only) | Yes |
+| **MVP 3d-2** | CLI argv hardening + tests; no execution (**implemented**) | No | No |
+| **MVP 3d** | Real testnet payout behind all gates in Section 4 and the [local payout design note](faucet_local_testnet_payout_design.md) (3d-3…3d-5) | Yes (testnet only) | Yes |
 | **MVP 3e** | Deployment hardening: reverse proxy, TLS, OS secrets, monitoring | Yes | Yes |
 
 Each phase requires tests and clippy clean; prior dry-run behavior remains until 3d explicitly enables sends.

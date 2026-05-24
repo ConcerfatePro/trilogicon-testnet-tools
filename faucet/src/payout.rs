@@ -8,7 +8,6 @@ pub struct PayoutRequest {
     pub address: String,
     pub amount: u64,
     pub fee: u64,
-    #[allow(dead_code)] // checked by future live adapters (MVP 3d-3+)
     pub dry_run: bool,
 }
 
@@ -24,6 +23,7 @@ pub struct PayoutResult {
 pub enum PayoutError {
     Disabled,
     Misconfigured,
+    InvalidRequest,
     BackendUnavailable,
     Rejected,
     Internal,
@@ -34,7 +34,7 @@ pub trait PayoutAdapter: Send + Sync {
     async fn submit_payout(&self, request: PayoutRequest) -> Result<PayoutResult, PayoutError>;
 }
 
-/// Safe parsed fields for a future CLI payout backend (no execution in MVP 3d-1).
+/// Safe parsed fields for a future CLI payout backend (no execution in MVP 3d-1+).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // wired when CLI execution is enabled (MVP 3d-3+)
 pub struct CliPayoutConfig {
@@ -57,35 +57,66 @@ impl CliPayoutAdapter {
     }
 }
 
+fn contains_control_chars(value: &str) -> bool {
+    value.chars().any(|c| c.is_control())
+}
+
+fn validate_config_path(value: Option<&str>) -> Result<String, PayoutError> {
+    let trimmed = value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or(PayoutError::Misconfigured)?;
+    if contains_control_chars(trimmed) {
+        return Err(PayoutError::InvalidRequest);
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_receiver(address: &str) -> Result<String, PayoutError> {
+    let trimmed = address.trim();
+    if trimmed.is_empty() {
+        return Err(PayoutError::InvalidRequest);
+    }
+    if contains_control_chars(trimmed) {
+        return Err(PayoutError::InvalidRequest);
+    }
+    Ok(trimmed.to_string())
+}
+
 /// Builds the future CLI argv for a `send` invocation. Does not spawn or execute anything.
 ///
-/// Shape (to verify against `trilogicon-core` before MVP 3d-3):
+/// Returns separate argv elements suitable for `Command::new(argv[0]).args(&argv[1..])` — never a
+/// shell string.
+///
+/// Shape (must be verified against `trilogicon-core` before MVP 3d-3):
 /// `{cli_path} send --data-dir {node_data_dir} {receiver} {amount} {fee}`
+///
+/// TODO(MVP 3d-3): If the core CLI requires `--genesis`, add an explicit config field after
+/// verifying the exact flag against `trilogicon-core`. Do not invent genesis behavior here.
 #[allow(dead_code)] // called from CLI adapter when execution is enabled (MVP 3d-3+)
 pub fn build_cli_send_args(
     request: &PayoutRequest,
     cli_config: &CliPayoutConfig,
 ) -> Result<Vec<String>, PayoutError> {
-    let cli_path = cli_config
-        .cli_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or(PayoutError::Misconfigured)?;
+    if !request.dry_run {
+        // Real payout argv construction is not enabled until MVP 3d-3+.
+        return Err(PayoutError::InvalidRequest);
+    }
 
-    let node_data_dir = cli_config
-        .node_data_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or(PayoutError::Misconfigured)?;
+    if request.amount == 0 || request.fee == 0 {
+        return Err(PayoutError::InvalidRequest);
+    }
+
+    let cli_path = validate_config_path(cli_config.cli_path.as_deref())?;
+    let node_data_dir = validate_config_path(cli_config.node_data_dir.as_deref())?;
+    let receiver = validate_receiver(&request.address)?;
 
     Ok(vec![
-        cli_path.to_string(),
+        cli_path,
         "send".to_string(),
         "--data-dir".to_string(),
-        node_data_dir.to_string(),
-        request.address.clone(),
+        node_data_dir,
+        receiver,
         request.amount.to_string(),
         request.fee.to_string(),
     ])
@@ -94,7 +125,7 @@ pub fn build_cli_send_args(
 #[async_trait]
 impl PayoutAdapter for CliPayoutAdapter {
     async fn submit_payout(&self, _request: PayoutRequest) -> Result<PayoutResult, PayoutError> {
-        // MVP 3d-1: skeleton only; real CLI execution remains gated for MVP 3d-3+.
+        // MVP 3d-1/3d-2: skeleton only; does not call `build_cli_send_args` or execute CLI.
         Err(PayoutError::Disabled)
     }
 }
@@ -125,7 +156,7 @@ impl PayoutAdapter for DryRunPayoutAdapter {
     }
 }
 
-/// Production wiring: only the dry-run adapter is constructed (MVP 3d-1).
+/// Production wiring: only the dry-run adapter is constructed (MVP 3d-2).
 pub fn default_payout_adapter() -> Arc<dyn PayoutAdapter> {
     Arc::new(DryRunPayoutAdapter::new())
 }
@@ -139,7 +170,7 @@ mod tests {
             address: "tl1test_receiver".to_string(),
             amount: 10,
             fee: 1,
-            dry_run: false,
+            dry_run: true,
         }
     }
 
@@ -169,12 +200,30 @@ mod tests {
     }
 
     #[test]
+    fn build_cli_send_args_returns_separate_argv_elements() {
+        let argv = build_cli_send_args(&sample_request(), &sample_cli_config()).expect("argv");
+        assert_eq!(argv.len(), 7);
+        assert!(!argv.iter().any(|arg| arg.contains(' ')));
+        assert_ne!(argv[1], "send --data-dir");
+    }
+
+    #[test]
     fn build_cli_send_args_rejects_missing_cli_path() {
         let config = CliPayoutConfig {
             cli_path: None,
             ..sample_cli_config()
         };
         let err = build_cli_send_args(&sample_request(), &config).expect_err("missing cli");
+        assert_eq!(err, PayoutError::Misconfigured);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_empty_cli_path() {
+        let config = CliPayoutConfig {
+            cli_path: Some("   ".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("empty cli");
         assert_eq!(err, PayoutError::Misconfigured);
     }
 
@@ -188,11 +237,101 @@ mod tests {
         assert_eq!(err, PayoutError::Misconfigured);
     }
 
+    #[test]
+    fn build_cli_send_args_rejects_empty_node_data_dir() {
+        let config = CliPayoutConfig {
+            node_data_dir: Some("\t".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("empty data dir");
+        assert_eq!(err, PayoutError::Misconfigured);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_empty_receiver() {
+        let request = PayoutRequest {
+            address: "   ".to_string(),
+            ..sample_request()
+        };
+        let err = build_cli_send_args(&request, &sample_cli_config()).expect_err("empty receiver");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_zero_amount() {
+        let request = PayoutRequest {
+            amount: 0,
+            ..sample_request()
+        };
+        let err = build_cli_send_args(&request, &sample_cli_config()).expect_err("zero amount");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_zero_fee() {
+        let request = PayoutRequest {
+            fee: 0,
+            ..sample_request()
+        };
+        let err = build_cli_send_args(&request, &sample_cli_config()).expect_err("zero fee");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_non_dry_run_request() {
+        let request = PayoutRequest {
+            dry_run: false,
+            ..sample_request()
+        };
+        let err = build_cli_send_args(&request, &sample_cli_config()).expect_err("live request");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_control_char_in_cli_path() {
+        let config = CliPayoutConfig {
+            cli_path: Some("/bin/tri\u{0}l".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("cli control");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_control_char_in_node_data_dir() {
+        let config = CliPayoutConfig {
+            node_data_dir: Some("/var/data\u{0}".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("data dir control");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_control_char_in_receiver() {
+        let request = PayoutRequest {
+            address: "addr\u{1}b".to_string(),
+            ..sample_request()
+        };
+        let err =
+            build_cli_send_args(&request, &sample_cli_config()).expect_err("receiver control");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
     #[tokio::test]
-    async fn cli_adapter_submit_payout_is_disabled() {
-        let adapter = CliPayoutAdapter::new(sample_cli_config());
+    async fn cli_adapter_submit_payout_is_disabled_without_execution() {
+        let adapter = CliPayoutAdapter::new(CliPayoutConfig {
+            cli_path: None,
+            node_data_dir: None,
+            fixed_fee: 1,
+        });
         let err = adapter
-            .submit_payout(sample_request())
+            .submit_payout(PayoutRequest {
+                address: "tl1test_receiver".to_string(),
+                amount: 10,
+                fee: 1,
+                dry_run: false,
+            })
             .await
             .expect_err("disabled");
         assert_eq!(err, PayoutError::Disabled);

@@ -217,7 +217,7 @@ fn map_payout_error(err: PayoutError) -> (StatusCode, Json<ClaimErrResponse>) {
                 error: "payouts_not_enabled",
             }),
         ),
-        PayoutError::Rejected => (
+        PayoutError::InvalidRequest | PayoutError::Rejected => (
             StatusCode::BAD_REQUEST,
             Json(ClaimErrResponse {
                 ok: false,

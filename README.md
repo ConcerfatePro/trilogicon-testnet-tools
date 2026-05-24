@@ -80,6 +80,14 @@ MVP 3d-1 adds a `CliPayoutAdapter` skeleton and pure `build_cli_send_args` helpe
 - No seed files are read; no TRIL is sent.
 - Real CLI payout execution remains MVP 3d-3 or later.
 
+### CLI argv construction (MVP 3d-2)
+
+MVP 3d-2 hardens `build_cli_send_args` with stricter validation (empty paths, zero amount/fee, control characters, non-dry-run requests rejected for argv building).
+
+- **Still no command execution** — no `Command`, spawn, or subprocess.
+- CLI argv shape must be **verified against `trilogicon-core`** before MVP 3d-3.
+- Live claims still use `DryRunPayoutAdapter` only.
+
 ### Local testnet payout design (MVP 3d-prep)
 
 Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**
