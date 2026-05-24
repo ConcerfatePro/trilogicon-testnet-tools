@@ -70,6 +70,16 @@ MVP 3c adds an internal `PayoutAdapter` trait and a `DryRunPayoutAdapter` implem
 - `FAUCET_ENABLE_PAYOUTS=true` still fails startup.
 - Real testnet payouts remain a later milestone (MVP 3d).
 
+### CLI payout adapter skeleton (MVP 3d-1)
+
+MVP 3d-1 adds a `CliPayoutAdapter` skeleton and pure `build_cli_send_args` helper for future `node send`-style invocations.
+
+- **No CLI commands are executed** — no `Command`, spawn, or subprocess.
+- `CliPayoutAdapter::submit_payout` always returns `Disabled`.
+- **`default_payout_adapter()` still returns `DryRunPayoutAdapter` only** for live requests.
+- No seed files are read; no TRIL is sent.
+- Real CLI payout execution remains MVP 3d-3 or later.
+
 ### Local testnet payout design (MVP 3d-prep)
 
 Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**

@@ -366,6 +366,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn claim_returns_unchanged_dry_run_response() {
+        let (_, state) = test_app(true, 3600, 3600).await;
+
+        let Json(body) = process_claim(
+            &state,
+            "10.0.0.99",
+            ClaimRequest {
+                address: "tl1test_example".to_string(),
+            },
+        )
+        .await
+        .expect("claim");
+
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "ok": true,
+                "dry_run": true,
+                "message": "claim accepted in dry-run mode",
+                "address": "tl1test_example",
+                "amount": 10,
+                "tx_hash": serde_json::Value::Null,
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn claim_uses_dry_run_adapter_status_in_db() {
         let (_, state) = test_app(true, 3600, 3600).await;
 

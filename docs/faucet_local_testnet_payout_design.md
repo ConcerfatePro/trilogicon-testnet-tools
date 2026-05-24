@@ -268,8 +268,8 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | Phase | Scope | Executes CLI? | Sends TRIL? |
 |-------|--------|---------------|-------------|
 | **MVP 3d-prep (this doc)** | Design note, README link | No | No |
-| **MVP 3d-1** | `CliPayoutAdapter` skeleton behind disabled gate; no subprocess | No | No |
-| **MVP 3d-2** | CLI argv construction + unit tests; verify command shape vs core | No | No |
+| **MVP 3d-1** | `CliPayoutAdapter` skeleton + `build_cli_send_args`; `submit_payout` returns `Disabled`; no subprocess (**implemented**) | No | No |
+| **MVP 3d-2** | Verify CLI command shape vs `trilogicon-core`; extend argv tests; still no execution | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |
