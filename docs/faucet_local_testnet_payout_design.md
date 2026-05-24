@@ -84,42 +84,59 @@ POST /api/claim
   → verify runtime payout gates (dry_run off, enable_payouts on, network testnet, …)
   → construct PayoutRequest { address, amount, fee, dry_run: false }
   → CliPayoutAdapter::submit_payout
-       → load faucet wallet from FAUCET_WALLET_SEED_PATH (first read at startup or per-send—TBD in 3d)
        → invoke CLI send with fixed args (no shell interpolation)
-       → parse tx hash from structured output
+       → parse tx hash from stdout ("Queued tx …")
+       → record **queued** status (tx in pending_tx.tril; not yet sealed)
   → insert claim row { address, ip, amount, dry_run: false, status, tx reference }
   → return JSON { ok, dry_run: false, tx_hash, … }
 ```
+
+**Note:** `node send` queues to `pending_tx.tril`; `node run` must drain and seal. Payout completion is not immediate at CLI success.
 
 If any gate fails at **startup**, the process must not start. If a gate fails at **request time** (e.g. backend unavailable), return a stable API error and record failure status without claiming success.
 
 ---
 
-## 6. Expected CLI command shape
+## 6. Verified CLI command shape
 
-**To verify before implementation** against the current `trilogicon-core` CLI—command names and flags may differ.
-
-Proposed shape based on typical Trilogicon node CLI behavior:
+**Verified against `trilogicon-core` (MVP 3d-2b).** Binary: `node`.
 
 ```bash
 <FAUCET_NODE_CLI_PATH> send \
-  --data-dir <FAUCET_NODE_DATA_DIR> \
-  --genesis <GENESIS_PATH> \
-  <RECEIVER_ADDRESS> \
+  [--data-dir <FAUCET_NODE_DATA_DIR>] \
+  [--genesis <GENESIS_PATH>] \
+  <RECEIVER> \
   <AMOUNT> \
-  <FEE>
+  [<FEE>]
 ```
 
-Open questions for MVP 3d-1/3d-2:
+| Item | Verified behavior |
+|------|-------------------|
+| `--data-dir` | Optional; defaults to `.` |
+| `--genesis` | Optional; defaults to `{data-dir}/genesis.toml` when omitted |
+| Positional order | `RECEIVER`, `AMOUNT`, `FEE` |
+| `AMOUNT` / `FEE` | u64 decimals; `FEE` defaults to `1` if omitted |
+| Wallet / seed | CLI loads `{data-dir}/wallet.seed` (faucet must not read seed until a later MVP) |
+| Chain state | Reads genesis + local `chain.blocks`; computes nonce from committed state |
+| Send side effect | Signs tx and **appends to `pending_tx.tril`** — does **not** broadcast directly to a running node |
+| Completion | `node run` must later drain the queue and seal blocks |
+
+Success stdout (for future parsing in MVP 3d-3+):
+
+```text
+Queued tx <TX_HASH> -> <RECEIVER> amount <AMOUNT> fee <FEE> (nonce <NONCE>)
+```
+
+The faucet argv builder (`build_cli_send_args`) constructs separate argv elements matching this shape. It always includes `--data-dir`, receiver, amount, and fee explicitly; `--genesis` is included only when configured. **No execution** until MVP 3d-3.
+
+**Payout success semantics (future):** A CLI exit with the success line above means the transaction is **queued**, not confirmed or sealed. Claim status and API responses must distinguish `payout_queued` (or equivalent) from `payout_confirmed` / sealed-on-chain states. Do not return `ok: true` with a final `tx_hash` until the operator-defined confirmation policy is met (likely after `node run` has sealed the block).
+
+Open questions for MVP 3d-3:
 
 | Item | Notes |
 |------|--------|
-| `GENESIS_PATH` | May need `FAUCET_GENESIS_PATH` or derive from node data dir—**verify in core** |
-| Wallet / seed | How CLI selects signing identity (seed file path, env, or flag)—**verify in core** |
-| Output format | JSON vs plain text for tx hash—prefer structured output if available |
 | Exit codes | Map non-zero exit to `PayoutError::Rejected` vs `BackendUnavailable` |
-
-Document exact invocation in MVP 3d-2 with integration tests that **construct argv only** (no execution) until 3d-3 gates are satisfied.
+| Queue drain | How faucet observes sealed state vs queued-only (polling, operator workflow) |
 
 ---
 
@@ -147,7 +164,7 @@ All of the following must be set and validated at startup when payouts are enabl
 
 - Genesis file path or network profile identifier aligned with local testnet
 - Faucet wallet funded with a **capped** testnet balance before enabling payouts
-- Optional: `FAUCET_GENESIS_PATH` if not inferable from node data dir
+- Optional: `FAUCET_GENESIS_PATH` — only if overriding core default `{data-dir}/genesis.toml`
 
 Today, `FAUCET_ENABLE_PAYOUTS=true` fails startup in MVP 3a–3c; these combinations are design targets for MVP 3d.
 
@@ -186,7 +203,8 @@ Proposed **claim `status` values**:
 | Status | Meaning |
 |--------|---------|
 | `dry_run_accepted` | Dry-run mode; no chain send (current behavior) |
-| `payout_submitted` | CLI/RPC accepted send; tx hash known |
+| `payout_submitted` | CLI/RPC accepted send; tx hash known (**queued** for CLI path — in `pending_tx.tril`) |
+| `payout_confirmed` | Tx sealed on chain (after `node run` or RPC confirmation policy) |
 | `payout_rejected` | Node/CLI rejected tx (invalid address, insufficient funds, etc.) |
 | `payout_backend_unavailable` | CLI/RPC timeout, process crash, unreachable node |
 | `payout_misconfigured` | Adapter misconfiguration detected at request time |
@@ -269,7 +287,8 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 |-------|--------|---------------|-------------|
 | **MVP 3d-prep (this doc)** | Design note, README link | No | No |
 | **MVP 3d-1** | `CliPayoutAdapter` skeleton + `build_cli_send_args`; `submit_payout` returns `Disabled`; no subprocess (**implemented**) | No | No |
-| **MVP 3d-2** | CLI argv hardening + extended validation tests; exact command shape must be verified against `trilogicon-core` before 3d-3; no subprocess (**implemented**) | No | No |
+| **MVP 3d-2** | CLI argv hardening + extended validation tests; no subprocess (**implemented**) | No | No |
+| **MVP 3d-2b** | Align argv builder with verified core `node send` syntax; optional `--genesis`; document queue vs sealed semantics; no subprocess (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |

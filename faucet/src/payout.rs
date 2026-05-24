@@ -40,6 +40,8 @@ pub trait PayoutAdapter: Send + Sync {
 pub struct CliPayoutConfig {
     pub cli_path: Option<String>,
     pub node_data_dir: Option<String>,
+    /// Optional; core defaults to `{node_data_dir}/genesis.toml` when omitted.
+    pub genesis_path: Option<String>,
     pub fixed_fee: u64,
 }
 
@@ -83,16 +85,32 @@ fn validate_receiver(address: &str) -> Result<String, PayoutError> {
     Ok(trimmed.to_string())
 }
 
+fn validate_optional_genesis_path(value: Option<&str>) -> Result<Option<String>, PayoutError> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Err(PayoutError::InvalidRequest);
+            }
+            if contains_control_chars(trimmed) {
+                return Err(PayoutError::InvalidRequest);
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+    }
+}
+
 /// Builds the future CLI argv for a `send` invocation. Does not spawn or execute anything.
 ///
 /// Returns separate argv elements suitable for `Command::new(argv[0]).args(&argv[1..])` — never a
 /// shell string.
 ///
-/// Shape (must be verified against `trilogicon-core` before MVP 3d-3):
-/// `{cli_path} send --data-dir {node_data_dir} {receiver} {amount} {fee}`
+/// Verified core shape (MVP 3d-2b):
+/// `{cli_path} send --data-dir {node_data_dir} [--genesis {genesis_path}] {receiver} {amount} {fee}`
 ///
-/// TODO(MVP 3d-3): If the core CLI requires `--genesis`, add an explicit config field after
-/// verifying the exact flag against `trilogicon-core`. Do not invent genesis behavior here.
+/// When `genesis_path` is omitted, core defaults to `{node_data_dir}/genesis.toml`.
+/// Fee is always included explicitly even though core defaults fee to 1.
 #[allow(dead_code)] // called from CLI adapter when execution is enabled (MVP 3d-3+)
 pub fn build_cli_send_args(
     request: &PayoutRequest,
@@ -109,17 +127,26 @@ pub fn build_cli_send_args(
 
     let cli_path = validate_config_path(cli_config.cli_path.as_deref())?;
     let node_data_dir = validate_config_path(cli_config.node_data_dir.as_deref())?;
+    let genesis_path = validate_optional_genesis_path(cli_config.genesis_path.as_deref())?;
     let receiver = validate_receiver(&request.address)?;
 
-    Ok(vec![
+    let mut argv = vec![
         cli_path,
         "send".to_string(),
         "--data-dir".to_string(),
         node_data_dir,
-        receiver,
-        request.amount.to_string(),
-        request.fee.to_string(),
-    ])
+    ];
+
+    if let Some(genesis_path) = genesis_path {
+        argv.push("--genesis".to_string());
+        argv.push(genesis_path);
+    }
+
+    argv.push(receiver);
+    argv.push(request.amount.to_string());
+    argv.push(request.fee.to_string());
+
+    Ok(argv)
 }
 
 #[async_trait]
@@ -178,12 +205,13 @@ mod tests {
         CliPayoutConfig {
             cli_path: Some("/usr/local/bin/trilogicon".to_string()),
             node_data_dir: Some("/var/lib/trilogicon-testnet".to_string()),
+            genesis_path: None,
             fixed_fee: 1,
         }
     }
 
     #[test]
-    fn build_cli_send_args_builds_expected_argv() {
+    fn build_cli_send_args_builds_expected_argv_without_genesis() {
         let argv = build_cli_send_args(&sample_request(), &sample_cli_config()).expect("argv");
         assert_eq!(
             argv,
@@ -200,11 +228,82 @@ mod tests {
     }
 
     #[test]
+    fn build_cli_send_args_builds_expected_argv_with_genesis() {
+        let config = CliPayoutConfig {
+            genesis_path: Some("/var/lib/trilogicon-testnet/genesis.toml".to_string()),
+            ..sample_cli_config()
+        };
+        let argv = build_cli_send_args(&sample_request(), &config).expect("argv");
+        assert_eq!(
+            argv,
+            vec![
+                "/usr/local/bin/trilogicon".to_string(),
+                "send".to_string(),
+                "--data-dir".to_string(),
+                "/var/lib/trilogicon-testnet".to_string(),
+                "--genesis".to_string(),
+                "/var/lib/trilogicon-testnet/genesis.toml".to_string(),
+                "tl1test_receiver".to_string(),
+                "10".to_string(),
+                "1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_cli_send_args_missing_genesis_is_allowed() {
+        let config = CliPayoutConfig {
+            genesis_path: None,
+            ..sample_cli_config()
+        };
+        let argv = build_cli_send_args(&sample_request(), &config).expect("argv");
+        assert!(!argv.iter().any(|arg| arg == "--genesis"));
+    }
+
+    #[test]
+    fn build_cli_send_args_includes_fee_explicitly() {
+        let request = PayoutRequest {
+            fee: 1,
+            ..sample_request()
+        };
+        let argv = build_cli_send_args(&request, &sample_cli_config()).expect("argv");
+        assert_eq!(argv.last(), Some(&"1".to_string()));
+    }
+
+    #[test]
     fn build_cli_send_args_returns_separate_argv_elements() {
         let argv = build_cli_send_args(&sample_request(), &sample_cli_config()).expect("argv");
         assert_eq!(argv.len(), 7);
         assert!(!argv.iter().any(|arg| arg.contains(' ')));
         assert_ne!(argv[1], "send --data-dir");
+
+        let config = CliPayoutConfig {
+            genesis_path: Some("/var/lib/trilogicon-testnet/genesis.toml".to_string()),
+            ..sample_cli_config()
+        };
+        let argv = build_cli_send_args(&sample_request(), &config).expect("argv");
+        assert_eq!(argv.len(), 9);
+        assert!(!argv.iter().any(|arg| arg.contains(' ')));
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_empty_genesis_path_when_provided() {
+        let config = CliPayoutConfig {
+            genesis_path: Some("   ".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("empty genesis");
+        assert_eq!(err, PayoutError::InvalidRequest);
+    }
+
+    #[test]
+    fn build_cli_send_args_rejects_control_char_in_genesis_path() {
+        let config = CliPayoutConfig {
+            genesis_path: Some("/var/genesis\u{0}.toml".to_string()),
+            ..sample_cli_config()
+        };
+        let err = build_cli_send_args(&sample_request(), &config).expect_err("genesis control");
+        assert_eq!(err, PayoutError::InvalidRequest);
     }
 
     #[test]
@@ -323,6 +422,7 @@ mod tests {
         let adapter = CliPayoutAdapter::new(CliPayoutConfig {
             cli_path: None,
             node_data_dir: None,
+            genesis_path: None,
             fixed_fee: 1,
         });
         let err = adapter

@@ -80,13 +80,22 @@ MVP 3d-1 adds a `CliPayoutAdapter` skeleton and pure `build_cli_send_args` helpe
 - No seed files are read; no TRIL is sent.
 - Real CLI payout execution remains MVP 3d-3 or later.
 
-### CLI argv construction (MVP 3d-2)
+### CLI argv construction (MVP 3d-2 / 3d-2b)
 
 MVP 3d-2 hardens `build_cli_send_args` with stricter validation (empty paths, zero amount/fee, control characters, non-dry-run requests rejected for argv building).
 
+MVP 3d-2b aligns the argv builder with the **verified** Trilogicon core CLI shape:
+
+```text
+<cli_path> send --data-dir <node_data_dir> [--genesis <genesis_path>] <receiver> <amount> <fee>
+```
+
+- **`--genesis` is optional** — core defaults to `{data-dir}/genesis.toml` when omitted.
+- Fee is included explicitly even though core defaults fee to `1`.
 - **Still no command execution** — no `Command`, spawn, or subprocess.
-- CLI argv shape must be **verified against `trilogicon-core`** before MVP 3d-3.
+- Core `node send` **queues** the transaction to `pending_tx.tril`; it does not broadcast directly. A running `node run` must drain the queue and seal blocks for payout completion.
 - Live claims still use `DryRunPayoutAdapter` only.
+- Real CLI payout execution remains MVP 3d-3 or later.
 
 ### Local testnet payout design (MVP 3d-prep)
 
