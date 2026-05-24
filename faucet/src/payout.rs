@@ -3,6 +3,31 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
+/// Claim/payout status strings for `claims.status` and API responses.
+///
+/// Design and lifecycle: `docs/faucet_payout_status_model.md`
+#[allow(dead_code)] // referenced when real payouts are wired (MVP 3d-3+)
+pub mod claim_status {
+    /// Dry-run claim accepted; no transaction sent (current default).
+    pub const DRY_RUN_ACCEPTED: &str = "dry_run_accepted";
+    /// Real claim recorded before CLI execution attempt.
+    pub const PAYOUT_REQUESTED: &str = "payout_requested";
+    /// CLI queued tx into `pending_tx.tril`; hash known, not sealed.
+    pub const PAYOUT_QUEUED: &str = "payout_queued";
+    /// Request rejected before CLI submission.
+    pub const PAYOUT_REJECTED: &str = "payout_rejected";
+    /// CLI/node backend unavailable.
+    pub const PAYOUT_BACKEND_UNAVAILABLE: &str = "payout_backend_unavailable";
+    /// Payout configuration invalid.
+    pub const PAYOUT_MISCONFIGURED: &str = "payout_misconfigured";
+    /// CLI failed clearly; no tx hash produced.
+    pub const PAYOUT_FAILED: &str = "payout_failed";
+    /// Ambiguous outcome; do not retry blindly.
+    pub const PAYOUT_UNKNOWN: &str = "payout_unknown";
+    /// Tx sealed in a block (future confirmation worker).
+    pub const PAYOUT_CONFIRMED: &str = "payout_confirmed";
+}
+
 /// Input for a single faucet payout attempt.
 pub struct PayoutRequest {
     pub address: String,
@@ -177,7 +202,7 @@ impl PayoutAdapter for DryRunPayoutAdapter {
     async fn submit_payout(&self, _request: PayoutRequest) -> Result<PayoutResult, PayoutError> {
         Ok(PayoutResult {
             tx_hash: None,
-            status: "dry_run_accepted".to_string(),
+            status: claim_status::DRY_RUN_ACCEPTED.to_string(),
             dry_run: true,
         })
     }

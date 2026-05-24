@@ -9,6 +9,7 @@ It is a **documentation-only** milestone (MVP 3d-prep). Reading or following thi
 Related documents:
 
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — threat model, secrets, fail-closed startup rules
+- [faucet_payout_status_model.md](faucet_payout_status_model.md) — claim/payout status vocabulary, queue vs confirmation, DB design
 - Faucet backend: `faucet/` (Rust + Axum, dry-run today)
 
 ---
@@ -129,7 +130,7 @@ Queued tx <TX_HASH> -> <RECEIVER> amount <AMOUNT> fee <FEE> (nonce <NONCE>)
 
 The faucet argv builder (`build_cli_send_args`) constructs separate argv elements matching this shape. It always includes `--data-dir`, receiver, amount, and fee explicitly; `--genesis` is included only when configured. **No execution** until MVP 3d-3.
 
-**Payout success semantics (future):** A CLI exit with the success line above means the transaction is **queued**, not confirmed or sealed. Claim status and API responses must distinguish `payout_queued` (or equivalent) from `payout_confirmed` / sealed-on-chain states. Do not return `ok: true` with a final `tx_hash` until the operator-defined confirmation policy is met (likely after `node run` has sealed the block).
+**Payout success semantics (future):** A CLI exit with the success line above means the transaction is **queued**, not confirmed or sealed. Claim status and API responses must distinguish `payout_queued` from `payout_confirmed` / sealed-on-chain states. See **[faucet_payout_status_model.md](faucet_payout_status_model.md)** for the full status vocabulary, user-facing messages, and DB implications. Do not return `ok: true` implying final confirmation until the operator-defined confirmation policy is met (likely after `node run` has sealed the block).
 
 Open questions for MVP 3d-3:
 
@@ -198,18 +199,19 @@ Until MVP 3d implements these checks together with `FAUCET_ENABLE_PAYOUTS=true`,
 
 Future claim rows and API responses must **not pretend success** when a real send fails.
 
-Proposed **claim `status` values**:
+Canonical **claim `status` values** are defined in **[faucet_payout_status_model.md](faucet_payout_status_model.md)**. Summary:
 
 | Status | Meaning |
 |--------|---------|
 | `dry_run_accepted` | Dry-run mode; no chain send (current behavior) |
-| `payout_submitted` | CLI/RPC accepted send; tx hash known (**queued** for CLI path — in `pending_tx.tril`) |
-| `payout_confirmed` | Tx sealed on chain (after `node run` or RPC confirmation policy) |
-| `payout_rejected` | Node/CLI rejected tx (invalid address, insufficient funds, etc.) |
-| `payout_backend_unavailable` | CLI/RPC timeout, process crash, unreachable node |
-| `payout_misconfigured` | Adapter misconfiguration detected at request time |
-| `payout_failed` | Send attempted; definitive failure |
-| `payout_unknown` | Ambiguous outcome (e.g. subprocess lost after possible submit) |
+| `payout_requested` | Real claim recorded before CLI attempt |
+| `payout_queued` | CLI queued tx into `pending_tx.tril`; hash known, not sealed |
+| `payout_confirmed` | Tx sealed on chain (after `node run` or confirmation worker) |
+| `payout_rejected` | Rejected before submission (validation, limits, policy) |
+| `payout_backend_unavailable` | CLI/RPC timeout, crash, unreachable backend |
+| `payout_misconfigured` | Adapter misconfiguration at request time |
+| `payout_failed` | CLI failed clearly; no tx hash |
+| `payout_unknown` | Ambiguous outcome; do not retry blindly |
 
 **API error mapping (stable strings, no secret leakage):**
 
@@ -218,7 +220,7 @@ Proposed **claim `status` values**:
 
 **HTTP success vs failure:**
 
-- Return `ok: true` with `tx_hash` only when status is `payout_submitted` (or equivalent confirmed state)
+- Return `ok: true` with `tx_hash` when status is `payout_queued` (queued, not confirmed) or `payout_confirmed` (later MVP)
 - Failed real payouts: `ok: false` with appropriate error code; DB row records failure status
 
 ---
@@ -236,7 +238,7 @@ Real payouts introduce **double-spend and duplicate-claim** risks not present in
 
 **Design direction (not fully solved in this doc):**
 
-- Consider `pending` status + idempotency key (address + time window or client token) in MVP 3d-4+
+- See [faucet_payout_status_model.md](faucet_payout_status_model.md) for insert-before-send recommendation, idempotency keys, and `payout_unknown` handling
 - Prefer **single-writer** or DB transaction around “reserve → send → finalize” when payouts enabled
 - Document ambiguous `payout_unknown` and operator reconciliation procedure
 - Keep per-address and per-IP cooldowns; add daily caps (`FAUCET_MAX_DAILY_*`) at send time
@@ -289,6 +291,7 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | **MVP 3d-1** | `CliPayoutAdapter` skeleton + `build_cli_send_args`; `submit_payout` returns `Disabled`; no subprocess (**implemented**) | No | No |
 | **MVP 3d-2** | CLI argv hardening + extended validation tests; no subprocess (**implemented**) | No | No |
 | **MVP 3d-2b** | Align argv builder with verified core `node send` syntax; optional `--genesis`; document queue vs sealed semantics; no subprocess (**implemented**) | No | No |
+| **MVP 3d-2c** | Payout status model + DB state design doc; inert status constants; no runtime change (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |
@@ -324,5 +327,6 @@ Each phase requires tests and `cargo clippy -- -D warnings` clean from `faucet/`
 ## References
 
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
-- Faucet payout module: `faucet/src/payout.rs` (`PayoutAdapter`, `DryRunPayoutAdapter`)
+- [faucet_payout_status_model.md](faucet_payout_status_model.md)
+- Faucet payout module: `faucet/src/payout.rs` (`PayoutAdapter`, `DryRunPayoutAdapter`, `claim_status`)
 - Config: `faucet/src/config.rs`
