@@ -101,6 +101,10 @@ MVP 3d-2b aligns the argv builder with the **verified** Trilogicon core CLI shap
 
 Before implementing real payout execution, read: **[docs/faucet_payout_status_model.md](docs/faucet_payout_status_model.md)**. It defines claim/payout status vocabulary (`dry_run_accepted`, `payout_queued`, `payout_confirmed`, …), queue vs confirmation semantics, DB column recommendations, duplicate-payout mitigations, and API response shapes. **This milestone does not change runtime behavior or DB schema.**
 
+### Payout worker and locking (MVP 3d-2d)
+
+Before implementing CLI execution, read: **[docs/faucet_payout_worker_design.md](docs/faucet_payout_worker_design.md)**. It defines the future single-worker model, locking options (in-process mutex, SQLite row locks, file lock on node data dir), timeout → `payout_unknown` rules, startup reconciliation, and duplicate-payout prevention. **No worker or execution code exists yet.**
+
 ### Local testnet payout design (MVP 3d-prep)
 
 Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**

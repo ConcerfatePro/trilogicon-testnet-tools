@@ -10,6 +10,7 @@ Related documents:
 
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — threat model, secrets, fail-closed startup rules
 - [faucet_payout_status_model.md](faucet_payout_status_model.md) — claim/payout status vocabulary, queue vs confirmation, DB design
+- [faucet_payout_worker_design.md](faucet_payout_worker_design.md) — payout worker, locking, serialization, timeout handling
 - Faucet backend: `faucet/` (Rust + Axum, dry-run today)
 
 ---
@@ -83,16 +84,16 @@ POST /api/claim
   → validate address
   → check address + IP rate limits
   → verify runtime payout gates (dry_run off, enable_payouts on, network testnet, …)
-  → construct PayoutRequest { address, amount, fee, dry_run: false }
-  → CliPayoutAdapter::submit_payout
+  → insert claim row { address, ip, amount, dry_run: false, status: payout_requested }
+  → enqueue payout worker (single serialized CLI execution — see faucet_payout_worker_design.md)
+  → worker: CliPayoutAdapter::submit_payout
        → invoke CLI send with fixed args (no shell interpolation)
        → parse tx hash from stdout ("Queued tx …")
-       → record **queued** status (tx in pending_tx.tril; not yet sealed)
-  → insert claim row { address, ip, amount, dry_run: false, status, tx reference }
-  → return JSON { ok, dry_run: false, tx_hash, … }
+       → update row: payout_queued, payout_failed, payout_unknown, etc.
+  → HTTP response: payout_requested (async) or payout_queued (if waiting on worker)
 ```
 
-**Note:** `node send` queues to `pending_tx.tril`; `node run` must drain and seal. Payout completion is not immediate at CLI success.
+**Note:** `node send` queues to `pending_tx.tril`; `node run` must drain and seal. Payout completion is not immediate at CLI success. Worker design: **[faucet_payout_worker_design.md](faucet_payout_worker_design.md)**.
 
 If any gate fails at **startup**, the process must not start. If a gate fails at **request time** (e.g. backend unavailable), return a stable API error and record failure status without claiming success.
 
@@ -239,7 +240,8 @@ Real payouts introduce **double-spend and duplicate-claim** risks not present in
 **Design direction (not fully solved in this doc):**
 
 - See [faucet_payout_status_model.md](faucet_payout_status_model.md) for insert-before-send recommendation, idempotency keys, and `payout_unknown` handling
-- Prefer **single-writer** or DB transaction around “reserve → send → finalize” when payouts enabled
+- See [faucet_payout_worker_design.md](faucet_payout_worker_design.md) for single-worker serialization and file-lock strategy
+- Prefer **single-writer** payout worker with DB transaction around “reserve → send → finalize” when payouts enabled
 - Document ambiguous `payout_unknown` and operator reconciliation procedure
 - Keep per-address and per-IP cooldowns; add daily caps (`FAUCET_MAX_DAILY_*`) at send time
 
@@ -292,6 +294,7 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | **MVP 3d-2** | CLI argv hardening + extended validation tests; no subprocess (**implemented**) | No | No |
 | **MVP 3d-2b** | Align argv builder with verified core `node send` syntax; optional `--genesis`; document queue vs sealed semantics; no subprocess (**implemented**) | No | No |
 | **MVP 3d-2c** | Payout status model + DB state design doc; inert status constants; no runtime change (**implemented**) | No | No |
+| **MVP 3d-2d** | Payout worker + locking design doc; no execution (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |
@@ -328,5 +331,6 @@ Each phase requires tests and `cargo clippy -- -D warnings` clean from `faucet/`
 
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
 - [faucet_payout_status_model.md](faucet_payout_status_model.md)
+- [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
 - Faucet payout module: `faucet/src/payout.rs` (`PayoutAdapter`, `DryRunPayoutAdapter`, `claim_status`)
 - Config: `faucet/src/config.rs`

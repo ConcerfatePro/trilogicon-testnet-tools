@@ -9,6 +9,7 @@ It is a **documentation-first** milestone (MVP 3d-2c). Reading or following this
 Related documents:
 
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md) — CLI adapter flow, argv shape, phased rollout
+- [faucet_payout_worker_design.md](faucet_payout_worker_design.md) — worker serialization, locking, timeout handling
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — secrets, fail-closed startup, operator checklist
 - Faucet payout module: `faucet/src/payout.rs`
 
@@ -16,7 +17,7 @@ Related documents:
 
 ## 2. Current state
 
-As of MVP 3d-2b, the faucet backend behaves as follows:
+As of MVP 3d-2d, the faucet backend behaves as follows:
 
 | Area | Behavior |
 |------|----------|
@@ -26,6 +27,7 @@ As of MVP 3d-2b, the faucet backend behaves as follows:
 | Payout adapter | Only `DryRunPayoutAdapter` is wired |
 | CLI | `node send` is **not executed**; `build_cli_send_args` constructs argv only |
 | Real TRIL | **Never sent** |
+| Payout worker | **Not implemented** — design: [faucet_payout_worker_design.md](faucet_payout_worker_design.md) |
 | `FAUCET_ENABLE_PAYOUTS=true` | **Fails startup** |
 
 When real payouts are enabled in a future MVP, core `node send` will **queue** the transaction into `{data-dir}/pending_tx.tril`. It does **not** directly broadcast or confirm the transaction. A running `node run` must later drain `pending_tx.tril`, seal the transaction into a block, and sync chain state. **CLI success therefore means queued, not confirmed.**
@@ -187,8 +189,12 @@ This table is **sufficient for dry-run** but **insufficient for real payouts** w
 | `idempotency_key` | TEXT NULL UNIQUE | Client or server key to dedupe retries |
 | `backend` | TEXT NULL | `cli` or `rpc` |
 | `updated_at` | TEXT NULL | Last status transition |
+| `worker_started_at` | TEXT NULL | When payout worker began processing row |
+| `worker_id` | TEXT NULL | Faucet process instance id for debugging |
 
-**Recommendation:** Add columns in a dedicated migration milestone (3d-3 or 3d-4) together with the payout worker. Until then, design code paths to **write** these fields but do not alter schema prematurely.
+Worker lifecycle and locking: [faucet_payout_worker_design.md](faucet_payout_worker_design.md).
+
+**Recommendation:** Add columns in a dedicated migration milestone (3d-3 or 3d-4) together with the payout worker.
 
 ### Index considerations (future)
 
@@ -232,7 +238,7 @@ This table is **sufficient for dry-run** but **insufficient for real payouts** w
 
 1. Validate address and rate limits.
 2. **Insert** row with `status = payout_requested` (or use idempotency key to return existing row).
-3. **Execute once** under a single payout worker / row-level lock.
+3. **Execute once** under a single payout worker / row-level lock (see [faucet_payout_worker_design.md](faucet_payout_worker_design.md)).
 4. **Update** row to terminal or intermediate status (`payout_queued`, `payout_failed`, …) with `tx_hash` and timestamps.
 5. For confirmation, **async worker** transitions `payout_queued` → `payout_confirmed` when chain state allows.
 
@@ -255,7 +261,7 @@ Real payouts introduce failure modes dry-run does not have.
 
 ### Recommendations
 
-- **Single payout worker** (or equivalent row-level mutex) for CLI execution.
+- **Single payout worker** (or equivalent row-level mutex) for CLI execution — [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
 - Keep **per-address and per-IP cooldowns**; consider treating `payout_requested` and `payout_unknown` as blocking further claims for that address until resolved.
 - Support **idempotency key** (header or body) in a future API revision.
 - **`payout_unknown` must block immediate retry** until operator or automated reconciliation clears or confirms the row.
@@ -395,6 +401,7 @@ For dry-run operations today, reconciliation is trivial: all rows are `dry_run_a
 ## References
 
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md)
+- [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md)
 - Status constants (inert): `faucet/src/payout.rs` (`claim_status` module)
 - Claims schema: `faucet/src/db.rs`
