@@ -10,6 +10,7 @@ Related documents:
 
 - [faucet_payout_status_model.md](faucet_payout_status_model.md) — status vocabulary, API responses, reconciliation
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md) — worker serialization, row claiming, locking
+- [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md) — final gate before migration/execution (MVP 3d-2f)
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md) — CLI adapter flow, phased rollout
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — secrets, fail-closed startup
 - Current schema: `faucet/src/db.rs`
@@ -342,7 +343,7 @@ SQLite `ALTER TABLE ADD COLUMN` is additive and preserves existing rows (dry-run
 | Staging / public | **Backup DB** before migration; test migration on copy first |
 | Rollback | Keep down migrations or restore backup; do not drop columns in production hastily |
 
-**Do not implement migration in MVP 3d-2e.**
+**Do not implement migration in MVP 3d-2e/3d-2f.** Add with worker in MVP 3d-3 only after [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md) Section 6 is satisfied.
 
 ---
 
@@ -425,5 +426,6 @@ Database backups (`faucet.db`) contain IPs and addresses — restrict file permi
 
 - [faucet_payout_status_model.md](faucet_payout_status_model.md)
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
+- [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md)
 - [faucet_local_testnet_payout_design.md](faucet_local_testnet_payout_design.md)
 - Current implementation: `faucet/src/db.rs`

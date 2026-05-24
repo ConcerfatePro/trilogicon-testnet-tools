@@ -109,6 +109,10 @@ Before implementing CLI execution, read: **[docs/faucet_payout_worker_design.md]
 
 Before implementing schema migrations, read: **[docs/faucet_payout_db_design.md](docs/faucet_payout_db_design.md)**. It defines future `claims` table columns (`tx_hash`, `idempotency_key`, `worker_id`, …), indexes, idempotency strategy, worker row-claiming SQL, and migration versioning. **No migration or schema change exists yet.**
 
+### Local payout readiness checklist (MVP 3d-2f)
+
+Before implementing DB migration or CLI execution, complete: **[docs/faucet_local_payout_readiness_checklist.md](docs/faucet_local_payout_readiness_checklist.md)**. It is the final pre-implementation gate — hard blockers, config/wallet/DB/worker/CLI checklists, local smoke test plan, and public deployment prohibitions. **Documentation only; no runtime change.**
+
 ### Local testnet payout design (MVP 3d-prep)
 
 Before implementing real testnet sends, read: **[docs/faucet_local_testnet_payout_design.md](docs/faucet_local_testnet_payout_design.md)**. It describes the intended CLI vs RPC adapter path, fail-closed config, failure statuses, idempotency risks, and phased MVP 3d rollout. **This milestone does not enable payouts or change `/api/claim` behavior.**

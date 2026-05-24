@@ -11,6 +11,7 @@ Related documents:
 - [faucet_secret_config_plan.md](faucet_secret_config_plan.md) — threat model, secrets, fail-closed startup rules
 - [faucet_payout_status_model.md](faucet_payout_status_model.md) — claim/payout status vocabulary, queue vs confirmation, DB design
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md) — payout worker, locking, serialization, timeout handling
+- [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md) — final gate before CLI execution (MVP 3d-2f)
 - Faucet backend: `faucet/` (Rust + Axum, dry-run today)
 
 ---
@@ -281,7 +282,7 @@ Safe manual checklist for future MVP 3d-4 (local only):
 10. POST claim with invalid receiver → **failure recorded**, no false success.
 11. Inspect logs: **no seeds, no full secret paths, no raw key material**.
 
-Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review completes.
+Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review completes. Use **[faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md)** Section 10 before any public deployment.
 
 ---
 
@@ -296,6 +297,7 @@ Do not expose payout-enabled faucet to the public internet until MVP 3d-5 review
 | **MVP 3d-2c** | Payout status model + DB state design doc; inert status constants; no runtime change (**implemented**) | No | No |
 | **MVP 3d-2d** | Payout worker + locking design doc; no execution (**implemented**) | No | No |
 | **MVP 3d-2e** | Payout DB schema + migration design doc; no migration code (**implemented**) | No | No |
+| **MVP 3d-2f** | Local payout readiness checklist; final pre-execution gate (**implemented**) | No | No |
 | **MVP 3d-3** | Local-only execution behind explicit env gates + operator checklist | Yes (local) | Yes (testnet) |
 | **MVP 3d-4** | Local testnet payout smoke test + failure-mode tests | Yes (local) | Yes (testnet) |
 | **MVP 3d-5** | Security/ops review before any public deployment | — | — |
@@ -334,5 +336,6 @@ Each phase requires tests and `cargo clippy -- -D warnings` clean from `faucet/`
 - [faucet_payout_status_model.md](faucet_payout_status_model.md)
 - [faucet_payout_worker_design.md](faucet_payout_worker_design.md)
 - [faucet_payout_db_design.md](faucet_payout_db_design.md)
+- [faucet_local_payout_readiness_checklist.md](faucet_local_payout_readiness_checklist.md)
 - Faucet payout module: `faucet/src/payout.rs` (`PayoutAdapter`, `DryRunPayoutAdapter`, `claim_status`)
 - Config: `faucet/src/config.rs`
